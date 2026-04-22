@@ -1,0 +1,5 @@
+input_path: data/raw/rfp_records.jsonl
+output_path: data/processed/train.jsonl
+task: section_generation
+target_section: executive_summary
+
