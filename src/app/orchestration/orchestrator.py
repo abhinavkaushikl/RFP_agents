@@ -4,13 +4,22 @@ import uuid
 
 from app.agents.registry import build_agent_registry
 from app.schemas.domain import AgentContext
+from app.services.llm_service import LLMService
+from app.services.retrieval_service import RetrievalService
 
 
 class ProposalWorkflowOrchestrator:
-    def __init__(self, agent_registry: dict[str, object] | None = None) -> None:
-        self.agent_registry = agent_registry or build_agent_registry()
+    def __init__(
+        self,
+        retrieval_service: RetrievalService,
+        llm_service: LLMService,
+        agent_registry: dict[str, object] | None = None,
 
-    def run_proposal_workflow(self, payload: dict, candidate_chunks: list[dict]) -> dict:
+
+    ) -> None:
+        self.agent_registry = agent_registry or build_agent_registry(retrieval_service, llm_service)
+
+    def run_proposal_workflow(self, payload: dict) -> dict:
         workflow_id = str(uuid.uuid4())
         context = AgentContext(workflow_id=workflow_id)
         step_summaries: list[str] = []
@@ -32,7 +41,6 @@ class ProposalWorkflowOrchestrator:
                     "section_type": section_key,
                     "solution_type": request_result.output["solution_type"],
                     "industry": request_result.output["industry"],
-                    "candidate_chunks": candidate_chunks,
                     "top_k": 5,
                 },
                 context,
@@ -43,8 +51,15 @@ class ProposalWorkflowOrchestrator:
                 {
                     "section_key": section_key,
                     "request_summary": request_result.output["request_summary"],
+                    "requirements": request_result.output.get("requirements", []),
+                    "vendors": request_result.output.get("vendors", []),
+                    "industry": request_result.output.get("industry", ""),
+                    "solution_type": request_result.output.get("solution_type", ""),
+                    "client_name": payload.get("metadata", {}).get("client_name")
+                    or payload.get("title", "the client"),
                     "evidence": retrieval_result.output["results"],
                     "matching_offerings": solution_result.output["matching_offerings"],
+                    "fast_mode": bool(payload.get("metadata", {}).get("fast_mode")),
                 },
                 context,
             )
@@ -90,7 +105,7 @@ class ProposalWorkflowOrchestrator:
             "step_summaries": step_summaries,
         }
 
-    def run_revision_workflow(self, payload: dict, base_section: dict, candidate_chunks: list[dict]) -> dict:
+    def run_revision_workflow(self, payload: dict, base_section: dict) -> dict:
         workflow_id = str(uuid.uuid4())
         context = AgentContext(workflow_id=workflow_id)
         planner_result = self.agent_registry["planner"].run(
@@ -107,7 +122,6 @@ class ProposalWorkflowOrchestrator:
                 "query": payload["instruction"],
                 "section_type": base_section["section_key"],
                 "solution_type": payload.get("solution_type"),
-                "candidate_chunks": candidate_chunks,
                 "top_k": 5,
             },
             context,
@@ -138,7 +152,33 @@ class ProposalWorkflowOrchestrator:
             "validation": validation_result.output,
         }
 
-    def run_document_match_workflow(self, payload: dict, candidate_chunks: list[dict]) -> dict:
+    def run_intent_detection_workflow(self, payload: dict) -> dict:
+        workflow_id = str(uuid.uuid4())
+        context = AgentContext(workflow_id=workflow_id)
+        result = self.agent_registry["intent_detection"].run(payload, context)
+        return {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "client_overview": result.output.get("client_overview", {}),
+            "buyer_readiness": result.output.get("buyer_readiness", {}),
+            "product_fit": result.output.get("product_fit", {}),
+            "summary": result.summary,
+        }
+
+    def run_market_research_workflow(self, payload: dict) -> dict:
+        workflow_id = str(uuid.uuid4())
+        context = AgentContext(workflow_id=workflow_id)
+        result = self.agent_registry["market_research"].run(payload, context)
+        return {
+            "workflow_id": workflow_id,
+            "status": "completed",
+            "rows": result.output.get("rows", []),
+            "offerings": result.output.get("offerings", []),
+            "industry": result.output.get("industry"),
+            "summary": result.summary,
+        }
+
+    def run_document_match_workflow(self, payload: dict) -> dict:
         workflow_id = str(uuid.uuid4())
         context = AgentContext(workflow_id=workflow_id)
         request_result = self.agent_registry["request_structuring"].run(
@@ -152,7 +192,6 @@ class ProposalWorkflowOrchestrator:
             {
                 "query": payload["request_text"],
                 "solution_type": request_result.output["solution_type"],
-                "candidate_chunks": candidate_chunks,
                 "top_k": 5,
             },
             context,

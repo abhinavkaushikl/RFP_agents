@@ -16,9 +16,17 @@ class Settings(BaseSettings):
 
     app_name: str = "RFP Proposal Platform"
     api_prefix: str = "/api"
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/proposal_platform"
+    database_url: str = "postgresql+psycopg://abhinavkaushik@localhost:5432/proposal_platform"
     redis_url: str = "redis://localhost:6379/0"
-    embedding_dimensions: int = Field(default=8, ge=1)
+    embedding_dimensions: int = Field(default=384, ge=1)
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    llm_provider: str = "ollama"
+    llm_model: str = "mistral:latest"
+    llm_base_url: str = "http://localhost:11434"
+    llm_temperature: float = Field(default=0.4, ge=0.0, le=1.5)
+    llm_max_tokens: int = Field(default=450, ge=50)
+    llm_context_window: int = Field(default=4096, ge=512)
+    llm_request_timeout_s: int = Field(default=300, ge=10)
 
 
 @lru_cache

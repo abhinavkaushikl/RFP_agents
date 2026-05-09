@@ -3,7 +3,12 @@ import json
 
 import streamlit as st
 
+from utils.theme import apply_theme, render_header, render_sidebar
+
 st.set_page_config(page_title="Ingestion", page_icon="📥", layout="wide")
+apply_theme()
+render_sidebar()
+render_header(title="Ingestion")
 st.title("Historical Proposals Ingestion")
 st.markdown("Upload historical proposal records to populate the retrieval index.")
 

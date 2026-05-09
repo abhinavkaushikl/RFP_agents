@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from pgvector.sqlalchemy import Vector
 
 revision = "0001_multi_agent_platform"
@@ -15,10 +16,26 @@ depends_on = None
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    actor_type = sa.Enum("system", "user", "agent", "import", name="actortype")
-    source_type = sa.Enum("historical", "uploaded", "generated", name="sourcetype")
-    workflow_status = sa.Enum("pending", "running", "completed", "failed", name="workflowstatus")
-    agent_type = sa.Enum(
+    op.execute("CREATE TYPE actortype AS ENUM ('system', 'user', 'agent', 'import')")
+    op.execute("CREATE TYPE sourcetype AS ENUM ('historical', 'uploaded', 'generated')")
+    op.execute("CREATE TYPE workflowstatus AS ENUM ('pending', 'running', 'completed', 'failed')")
+    op.execute(
+        "CREATE TYPE agenttype AS ENUM ("
+        "'planner', 'request_structuring', 'retrieval', 'generation', "
+        "'revision', 'validation', 'scoring', 'solution_comparison', 'orchestrator'"
+        ")"
+    )
+
+    actor_type = postgresql.ENUM(
+        "system", "user", "agent", "import", name="actortype", create_type=False
+    )
+    source_type = postgresql.ENUM(
+        "historical", "uploaded", "generated", name="sourcetype", create_type=False
+    )
+    workflow_status = postgresql.ENUM(
+        "pending", "running", "completed", "failed", name="workflowstatus", create_type=False
+    )
+    agent_type = postgresql.ENUM(
         "planner",
         "request_structuring",
         "retrieval",
@@ -29,12 +46,8 @@ def upgrade() -> None:
         "solution_comparison",
         "orchestrator",
         name="agenttype",
+        create_type=False,
     )
-
-    actor_type.create(op.get_bind(), checkfirst=True)
-    source_type.create(op.get_bind(), checkfirst=True)
-    workflow_status.create(op.get_bind(), checkfirst=True)
-    agent_type.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "section_types",
@@ -225,6 +238,13 @@ def upgrade() -> None:
     op.create_index("ix_embedding_chunks_content_hash", "embedding_chunks", ["content_hash"])
     op.create_index("ix_embedding_chunks_solution_type_id", "embedding_chunks", ["solution_type_id"])
     op.create_index("ix_embedding_chunks_section_type_id", "embedding_chunks", ["section_type_id"])
+    op.execute(
+        """
+        CREATE INDEX ix_embedding_chunks_embedding_cosine
+        ON embedding_chunks
+        USING hnsw (embedding vector_cosine_ops)
+        """
+    )
 
     op.create_table(
         "retrieval_events",

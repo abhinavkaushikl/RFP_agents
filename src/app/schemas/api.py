@@ -32,6 +32,7 @@ class RevisionRequest(BaseModel):
     instruction: str
     base_revision_id: str | None = None
     section_key: str | None = None
+    base_text: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -50,11 +51,44 @@ class DocumentMatchRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class MarketResearchRequest(BaseModel):
+    offerings: list[str]
+    requirement_summary: str = ""
+    industry: str | None = None
+    max_companies: int = 8
+
+
+class MarketResearchResponse(BaseModel):
+    workflow_id: str
+    status: str
+    rows: list[dict[str, Any]]
+    offerings: list[str]
+    industry: str | None = None
+    summary: str = ""
+
+
+class IntentDetectionRequest(BaseModel):
+    transcript_text: str
+    file_name: str | None = None
+
+
+class IntentDetectionResponse(BaseModel):
+    workflow_id: str
+    status: str
+    client_overview: dict[str, Any] = Field(default_factory=dict)
+    buyer_readiness: dict[str, Any] = Field(default_factory=dict)
+    product_fit: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+
+
 class WorkflowRunResponse(BaseModel):
     workflow_id: str
     status: str
     sections: list[dict[str, Any]]
     step_summaries: list[str]
+    scores: dict[str, Any] = Field(default_factory=dict)
+    request: dict[str, Any] = Field(default_factory=dict)
+    solution_comparison: dict[str, Any] = Field(default_factory=dict)
 
 
 class IngestionJobResponse(BaseModel):

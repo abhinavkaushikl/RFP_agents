@@ -1,7 +1,12 @@
 """Retrieval Explorer page."""
 import streamlit as st
 
+from utils.theme import apply_theme, render_header, render_sidebar
+
 st.set_page_config(page_title="Retrieval Explorer", page_icon="🔍", layout="wide")
+apply_theme()
+render_sidebar()
+render_header(title="Retrieval Explorer")
 st.title("Retrieval Explorer")
 st.markdown("Search historical proposal chunks to find relevant content.")
 

@@ -1,5 +1,5 @@
-from app.services.ingestion_service import IngestionService
-from app.services.orchestration_service import OrchestrationService
-from app.services.retrieval_service import RetrievalService
+"""Service layer.
 
-__all__ = ["IngestionService", "OrchestrationService", "RetrievalService"]
+Note: imports are intentionally kept narrow to avoid circular imports.
+Import services directly from their modules rather than through this package.
+"""

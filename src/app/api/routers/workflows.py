@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_chunk_store, get_orchestration_service
-from app.schemas.api import DocumentMatchRequest, RevisionRequest, WorkflowRunRequest, WorkflowRunResponse
+from app.api.deps import get_orchestration_service
+from app.schemas.api import (
+    DocumentMatchRequest,
+    IntentDetectionRequest,
+    IntentDetectionResponse,
+    MarketResearchRequest,
+    MarketResearchResponse,
+    RevisionRequest,
+    WorkflowRunRequest,
+    WorkflowRunResponse,
+)
 
 router = APIRouter(tags=["workflows"])
 
@@ -12,14 +21,16 @@ router = APIRouter(tags=["workflows"])
 def create_workflow_run(
     payload: WorkflowRunRequest,
     orchestration_service=Depends(get_orchestration_service),
-    chunk_store: list[dict] = Depends(get_chunk_store),
 ) -> WorkflowRunResponse:
-    result = orchestration_service.run_proposal(payload.model_dump(), chunk_store)
+    result = orchestration_service.run_proposal(payload.model_dump())
     return WorkflowRunResponse(
         workflow_id=result["workflow_id"],
         status=result["status"],
         sections=result["sections"],
         step_summaries=result["step_summaries"],
+        scores=result.get("scores", {}),
+        request=result.get("request", {}),
+        solution_comparison=result.get("solution_comparison", {}),
     )
 
 
@@ -28,23 +39,54 @@ def revise_generated_section(
     section_id: str,
     payload: RevisionRequest,
     orchestration_service=Depends(get_orchestration_service),
-    chunk_store: list[dict] = Depends(get_chunk_store),
 ) -> dict:
     base_section = {
         "section_id": section_id,
         "section_key": payload.section_key or "implementation_plan",
-        "draft_text": "Current draft emphasizes phased deployment and measurable business outcomes.",
+        "draft_text": payload.base_text
+        or "Current draft emphasizes phased deployment and measurable business outcomes.",
     }
-    return orchestration_service.run_revision(payload.model_dump(), base_section, chunk_store)
+    return orchestration_service.run_revision(payload.model_dump(), base_section)
 
 
 @router.post("/document-match-runs")
 def run_document_match(
     payload: DocumentMatchRequest,
     orchestration_service=Depends(get_orchestration_service),
-    chunk_store: list[dict] = Depends(get_chunk_store),
 ) -> dict:
-    return orchestration_service.run_document_match(payload.model_dump(), chunk_store)
+    return orchestration_service.run_document_match(payload.model_dump())
+
+
+@router.post("/intent-detection-runs", response_model=IntentDetectionResponse)
+def run_intent_detection(
+    payload: IntentDetectionRequest,
+    orchestration_service=Depends(get_orchestration_service),
+) -> IntentDetectionResponse:
+    result = orchestration_service.run_intent_detection(payload.model_dump())
+    return IntentDetectionResponse(
+        workflow_id=result["workflow_id"],
+        status=result["status"],
+        client_overview=result.get("client_overview", {}),
+        buyer_readiness=result.get("buyer_readiness", {}),
+        product_fit=result.get("product_fit", {}),
+        summary=result.get("summary", ""),
+    )
+
+
+@router.post("/market-research-runs", response_model=MarketResearchResponse)
+def run_market_research(
+    payload: MarketResearchRequest,
+    orchestration_service=Depends(get_orchestration_service),
+) -> MarketResearchResponse:
+    result = orchestration_service.run_market_research(payload.model_dump())
+    return MarketResearchResponse(
+        workflow_id=result["workflow_id"],
+        status=result["status"],
+        rows=result["rows"],
+        offerings=result["offerings"],
+        industry=result.get("industry"),
+        summary=result.get("summary", ""),
+    )
 
 
 @router.get("/proposal-documents/{document_id}/revisions")

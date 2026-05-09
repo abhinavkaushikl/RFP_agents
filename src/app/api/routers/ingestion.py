@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_chunk_store, get_ingestion_service
+from app.api.deps import get_ingestion_service
 from app.schemas.api import HistoricalProposalIngestRequest, IngestionJobResponse
 
 router = APIRouter(prefix="/historical-proposals", tags=["ingestion"])
@@ -12,10 +12,8 @@ router = APIRouter(prefix="/historical-proposals", tags=["ingestion"])
 def ingest_historical_proposals(
     payload: HistoricalProposalIngestRequest,
     ingestion_service=Depends(get_ingestion_service),
-    chunk_store: list[dict] = Depends(get_chunk_store),
 ) -> IngestionJobResponse:
     result = ingestion_service.ingest_historical(payload.records, payload.source_name)
-    chunk_store.extend(result["chunks"])
     return IngestionJobResponse(
         accepted=True,
         ingested_count=result["ingested_count"],

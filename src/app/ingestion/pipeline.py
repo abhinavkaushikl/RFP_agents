@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.embedding_service import EmbeddingService
+
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def normalize_historical_record(record: dict, source_name: str) -> dict:
@@ -25,15 +33,54 @@ def normalize_historical_record(record: dict, source_name: str) -> dict:
     }
 
 
-def chunk_section_text(section_key: str, text: str, chunk_size: int = 500, overlap: int = 75) -> list[dict]:
-    if not text.strip():
+def _sentence_aware_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
+    """Split text on sentence boundaries, packing into chunks of ~chunk_size chars.
+
+    Falls back to a fixed-window slice when a single sentence exceeds chunk_size.
+    """
+    text = text.strip()
+    if not text:
         return []
+
+    sentences = [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
+    if not sentences:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        if len(sentence) > chunk_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            start = 0
+            while start < len(sentence):
+                end = min(len(sentence), start + chunk_size)
+                chunks.append(sentence[start:end])
+                if end == len(sentence):
+                    break
+                start = max(end - overlap, start + 1)
+            continue
+
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if len(candidate) <= chunk_size:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = sentence
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def chunk_section_text(
+    section_key: str, text: str, chunk_size: int = 500, overlap: int = 75
+) -> list[dict]:
+    pieces = _sentence_aware_chunks(text, chunk_size=chunk_size, overlap=overlap)
     chunks: list[dict] = []
-    start = 0
-    chunk_index = 0
-    while start < len(text):
-        end = min(len(text), start + chunk_size)
-        chunk_text = text[start:end].strip()
+    for chunk_index, chunk_text in enumerate(pieces):
         content_hash = hashlib.sha256(f"{section_key}:{chunk_text}".encode("utf-8")).hexdigest()
         chunks.append(
             {
@@ -45,19 +92,14 @@ def chunk_section_text(section_key: str, text: str, chunk_size: int = 500, overl
                 "token_count": max(1, len(chunk_text.split())),
             }
         )
-        if end == len(text):
-            break
-        start = max(end - overlap, start + 1)
-        chunk_index += 1
     return chunks
 
 
-def build_embedding_stub(text: str, dimensions: int = 8) -> list[float]:
-    digest = hashlib.sha256(text.encode("utf-8")).digest()
-    return [round((digest[i] / 255), 6) for i in range(dimensions)]
-
-
-def ingest_historical_records(records: Iterable[dict], source_name: str) -> dict:
+def ingest_historical_records(
+    records: Iterable[dict],
+    source_name: str,
+    embedding_service: "EmbeddingService | None" = None,
+) -> dict:
     normalized = [normalize_historical_record(record, source_name) for record in records]
     chunks: list[dict] = []
     for item in normalized:
@@ -67,8 +109,14 @@ def ingest_historical_records(records: Iterable[dict], source_name: str) -> dict
                 chunk["proposal_id"] = proposal_id
                 chunk["solution_type"] = item["solution_type"]
                 chunk["industry"] = item["industry"]
-                chunk["embedding"] = build_embedding_stub(chunk["content"])
                 chunks.append(chunk)
+
+    if embedding_service is not None and chunks:
+        texts = [chunk["content"] for chunk in chunks]
+        embeddings = embedding_service.encode(texts)
+        for chunk, vec in zip(chunks, embeddings, strict=True):
+            chunk["embedding"] = vec
+
     return {
         "ingested_count": len(normalized),
         "section_count": sum(len(item["sections"]) for item in normalized),

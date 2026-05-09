@@ -1,0 +1,14 @@
+{
+  "title": "AIOps Modernization for Vodafone India",
+  "client": "Vodafone India",
+  "industry": "Telecommunications",
+  "solution_type": "aiops_general",
+  "request_text": "Vodafone India operates a heterogeneous network spanning Nokia core infrastructure, Huawei radio access, and Ericsson transport layers, leading to fragmented observability and a current MTTR of 90 minutes.\n\nRequirements:\n- Current MTTR: 90 minutes; Target MTTR: 25 minutes\n- Reduce daily alert volume by 60% through event correlation and noise suppression\n- Achieve 99.95% network availability with proactive incident detection\n- Integration with existing Nokia, Huawei, and Ericsson OSS systems\n- SLA: 99.99% uptime guarantee, critical incident response within 15 minutes\n- Implementation timeline: 6 months\n- Estimated annual savings: $3M; ROI period: 14 months\n\nEvaluation Criteria: Business impact and ROI clarity; technical fit for telecom operations; delivery feasibility; commercial flexibility; differentiation against incumbent vendors.",
+  "sections": [
+    "executive_summary",
+    "deal_storytelling",
+    "competitor_positioning",
+    "implementation_plan",
+    "pricing_notes"
+  ]
+}

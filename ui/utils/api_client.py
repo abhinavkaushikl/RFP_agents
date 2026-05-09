@@ -4,7 +4,7 @@ from __future__ import annotations
 import requests
 
 BASE_URL = "http://localhost:8000/api"
-TIMEOUT = 120  # LLM workflows can be slow
+TIMEOUT = 600  # Local multi-section LLM workflows can take several minutes.
 
 
 def _url(path: str) -> str:
@@ -26,6 +26,7 @@ def create_workflow_run(
     solution_type: str | None = None,
     user_instruction: str | None = None,
     target_sections: list[str] | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     payload: dict = {"request_text": request_text, "title": title}
     if industry:
@@ -36,6 +37,8 @@ def create_workflow_run(
         payload["user_instruction"] = user_instruction
     if target_sections:
         payload["target_sections"] = target_sections
+    if metadata:
+        payload["metadata"] = metadata
     resp = requests.post(_url("/workflow-runs"), json=payload, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.json()
@@ -46,15 +49,47 @@ def revise_section(
     section_id: str,
     instruction: str,
     section_key: str | None = None,
+    base_text: str | None = None,
 ) -> dict:
     payload: dict = {"instruction": instruction}
     if section_key:
         payload["section_key"] = section_key
+    if base_text:
+        payload["base_text"] = base_text
     resp = requests.post(
         _url(f"/generated-sections/{section_id}/revise"),
         json=payload,
         timeout=TIMEOUT,
     )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ── Intent Detection ────────────────────────────────────────────────────
+def run_intent_detection(transcript_text: str, file_name: str | None = None) -> dict:
+    payload: dict = {"transcript_text": transcript_text}
+    if file_name:
+        payload["file_name"] = file_name
+    resp = requests.post(_url("/intent-detection-runs"), json=payload, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ── Market Research ─────────────────────────────────────────────────────
+def run_market_research(
+    offerings: list[str],
+    requirement_summary: str = "",
+    industry: str | None = None,
+    max_companies: int = 8,
+) -> dict:
+    payload: dict = {
+        "offerings": offerings,
+        "requirement_summary": requirement_summary,
+        "max_companies": max_companies,
+    }
+    if industry:
+        payload["industry"] = industry
+    resp = requests.post(_url("/market-research-runs"), json=payload, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 

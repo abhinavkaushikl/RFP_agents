@@ -1,51 +1,43 @@
 from __future__ import annotations
 
-from functools import lru_cache
+from collections.abc import Generator
 
-from app.ingestion.pipeline import ingest_historical_records
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db as _get_db
 from app.orchestration.orchestrator import ProposalWorkflowOrchestrator
+from app.services.embedding_service import EmbeddingService, get_embedding_service
 from app.services.ingestion_service import IngestionService
+from app.services.llm_service import LLMService, get_llm_service
 from app.services.orchestration_service import OrchestrationService
 from app.services.retrieval_service import RetrievalService
 
 
-@lru_cache
-def get_orchestrator() -> ProposalWorkflowOrchestrator:
-    return ProposalWorkflowOrchestrator()
+def get_db() -> Generator[Session, None, None]:
+    yield from _get_db()
 
 
-@lru_cache
-def get_orchestration_service() -> OrchestrationService:
-    return OrchestrationService(get_orchestrator())
+def get_retrieval_service(
+    db: Session = Depends(get_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+) -> RetrievalService:
+    return RetrievalService(db=db, embedding_service=embedding_service)
 
 
-@lru_cache
-def get_ingestion_service() -> IngestionService:
-    return IngestionService()
+def get_ingestion_service(
+    db: Session = Depends(get_db),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+) -> IngestionService:
+    return IngestionService(db=db, embedding_service=embedding_service)
 
 
-@lru_cache
-def get_retrieval_service() -> RetrievalService:
-    return RetrievalService()
-
-
-@lru_cache
-def get_chunk_store() -> list[dict]:
-    seed = ingest_historical_records(
-        [
-            {
-                "id": "seed-001",
-                "title": "AIOps Transformation for Multi-Vendor Networks",
-                "client_name": "Reliance Jio",
-                "industry": "Telecommunications",
-                "solutionType": "aiops_operations",
-                "proposal_sections": {
-                    "executive_summary": "We reduce MTTR through event correlation, workflow automation, and vendor-agnostic observability.",
-                    "implementation_plan": "A phased rollout across Nokia, Huawei, and Ericsson domains reduces risk and accelerates measurable operations gains.",
-                    "pricing_notes": "Commercials are aligned to phased onboarding and automation milestones.",
-                },
-            }
-        ],
-        source_name="seed",
+def get_orchestration_service(
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    llm_service: LLMService = Depends(get_llm_service),
+) -> OrchestrationService:
+    orchestrator = ProposalWorkflowOrchestrator(
+        retrieval_service=retrieval_service,
+        llm_service=llm_service,
     )
-    return seed["chunks"]
+    return OrchestrationService(orchestrator)

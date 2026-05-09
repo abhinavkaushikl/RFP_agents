@@ -1,7 +1,12 @@
 """Document Matching page."""
 import streamlit as st
 
+from utils.theme import apply_theme, render_header, render_sidebar
+
 st.set_page_config(page_title="Document Match", page_icon="📊", layout="wide")
+apply_theme()
+render_sidebar()
+render_header(title="Document Match")
 st.title("Document Matching")
 st.markdown("Score an existing proposal document against RFP requirements.")
 

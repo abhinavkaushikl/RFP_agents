@@ -1,7 +1,14 @@
 """Section Revision page."""
+from copy import deepcopy
+
 import streamlit as st
 
+from utils.theme import apply_theme, render_header, render_sidebar
+
 st.set_page_config(page_title="Section Revision", page_icon="✏️", layout="wide")
+apply_theme()
+render_sidebar()
+render_header(title="Section Revision")
 st.title("Revise a Generated Section")
 st.markdown("Select a previously generated section and provide revision instructions.")
 
@@ -54,12 +61,15 @@ if submitted:
                 section_id=section_id,
                 instruction=instruction,
                 section_key=selected_key,
+                base_text=selected_section.get("draft_text", ""),
             )
         except Exception as exc:
             st.error(f"Revision failed: {exc}")
             st.stop()
 
     st.success("Revision complete!")
+    revised_section = revision_result.get("revision", {})
+    revised_text = revised_section.get("draft_text", "_No revised text._")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -67,14 +77,53 @@ if submitted:
         st.markdown(selected_section.get("draft_text", ""))
     with col2:
         st.subheader("Revised")
-        revised_sections = revision_result.get("sections", [])
-        if revised_sections:
-            st.markdown(revised_sections[0].get("draft_text", "_No revised text._"))
-        else:
-            st.markdown(str(revision_result))
+        st.markdown(revised_text)
 
-    summaries = revision_result.get("step_summaries", [])
-    if summaries:
+    revised_workflow = deepcopy(selected_wf)
+    for section in revised_workflow.get("sections", []):
+        if section.get("section_key") == selected_key:
+            section["draft_text"] = revised_text
+            section["validation"] = revision_result.get("validation", section.get("validation", {}))
+            section["revision_summary"] = revised_section.get("revision_summary", "")
+            break
+
+    revision_steps = [
+        revision_result.get("plan", {}).get("workflow_type") and "Planned revision workflow.",
+        revision_result.get("retrieval", {}).get("results") is not None
+        and f"Retrieved {len(revision_result.get('retrieval', {}).get('results', []))} evidence chunks.",
+        revised_section.get("revision_summary"),
+        revision_result.get("validation") and "Validated revised section coverage.",
+    ]
+    revised_workflow["step_summaries"] = selected_wf.get("step_summaries", []) + [
+        step for step in revision_steps if step
+    ]
+
+    from utils.pdf_export import build_proposal_pdf
+
+    pdf_metadata = selected_wf.get("_pdf_metadata") or st.session_state.get("latest_pdf_metadata", {})
+    pdf_title = selected_wf.get("_pdf_title") or st.session_state.get(
+        "latest_pdf_title", "Revised RFP Proposal"
+    )
+    pdf_bytes = build_proposal_pdf(
+        workflow_result=revised_workflow,
+        metadata=pdf_metadata,
+        title=f"Revised {pdf_title}",
+    )
+    st.download_button(
+        "Download Revised Proposal PDF",
+        data=pdf_bytes,
+        file_name=f"revised_{selected_key}_proposal.pdf",
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if st.button("Use Revised Version In This Session", use_container_width=True):
+        selected_wf.update(revised_workflow)
+        st.session_state["latest_result"] = selected_wf
+        st.success("Session copy updated with the revised section.")
+
+    if revised_workflow.get("step_summaries"):
         with st.expander("Revision Steps"):
-            for i, s in enumerate(summaries, 1):
+            for i, s in enumerate(revised_workflow["step_summaries"], 1):
                 st.markdown(f"**Step {i}:** {s}")
