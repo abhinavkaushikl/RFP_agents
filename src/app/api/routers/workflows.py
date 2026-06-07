@@ -31,6 +31,7 @@ def create_workflow_run(
         scores=result.get("scores", {}),
         request=result.get("request", {}),
         solution_comparison=result.get("solution_comparison", {}),
+        agent_trace=result.get("agent_trace", []),
     )
 
 
@@ -70,6 +71,7 @@ def run_intent_detection(
         buyer_readiness=result.get("buyer_readiness", {}),
         product_fit=result.get("product_fit", {}),
         summary=result.get("summary", ""),
+        agent_trace=result.get("agent_trace", []),
     )
 
 
@@ -86,6 +88,7 @@ def run_market_research(
         offerings=result["offerings"],
         industry=result.get("industry"),
         summary=result.get("summary", ""),
+        agent_trace=result.get("agent_trace", []),
     )
 
 

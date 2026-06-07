@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = Field(default=384, ge=1)
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     llm_provider: str = "ollama"
-    llm_model: str = "mistral:latest"
+    llm_model: str = "qwen2.5:7b-instruct"
     llm_base_url: str = "http://localhost:11434"
     llm_temperature: float = Field(default=0.4, ge=0.0, le=1.5)
     llm_max_tokens: int = Field(default=450, ge=50)

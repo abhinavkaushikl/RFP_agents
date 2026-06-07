@@ -65,6 +65,7 @@ class MarketResearchResponse(BaseModel):
     offerings: list[str]
     industry: str | None = None
     summary: str = ""
+    agent_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IntentDetectionRequest(BaseModel):
@@ -79,6 +80,7 @@ class IntentDetectionResponse(BaseModel):
     buyer_readiness: dict[str, Any] = Field(default_factory=dict)
     product_fit: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
+    agent_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class WorkflowRunResponse(BaseModel):
@@ -89,6 +91,7 @@ class WorkflowRunResponse(BaseModel):
     scores: dict[str, Any] = Field(default_factory=dict)
     request: dict[str, Any] = Field(default_factory=dict)
     solution_comparison: dict[str, Any] = Field(default_factory=dict)
+    agent_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IngestionJobResponse(BaseModel):

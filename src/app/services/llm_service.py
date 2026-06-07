@@ -1,8 +1,8 @@
 """LLM service.
 
 Talks to Ollama's local HTTP API (default: http://localhost:11434) using the
-`/api/chat` endpoint. The default model is `mistral:latest` (Mistral 7B Instruct
-quantized, ~4.4 GB) which runs with Metal acceleration on Apple Silicon.
+`/api/chat` endpoint. The default model is `qwen2.5:7b-instruct` (Qwen 2.5 7B Instruct
+quantized, ~4.7 GB) which runs with Metal acceleration on Apple Silicon.
 
 Why Ollama over transformers/HF directly:
 - Quantized GGUF weights -> 5–10x faster on Mac M-series

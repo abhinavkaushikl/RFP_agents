@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from app.agents.buyer_intelligence import BuyerIntelligenceAgent
 from app.agents.generation import GenerationAgent
 from app.agents.intent_detection import IntentDetectionAgent
 from app.agents.market_research import MarketResearchAgent
 from app.agents.planner import PlannerAgent
+from app.agents.problem_framing import ProblemFramingAgent
+from app.agents.product_fit import ProductFitAgent
 from app.agents.request_structuring import RequestStructuringAgent
 from app.agents.retrieval import RetrievalAgent
 from app.agents.revision import RevisionAgent
@@ -33,4 +36,7 @@ def build_agent_registry(
             market_research_service or MarketResearchService(llm_service=llm_service)
         ),
         "intent_detection": IntentDetectionAgent(),
+        "problem_framing": ProblemFramingAgent(llm_service),
+        "buyer_intelligence": BuyerIntelligenceAgent(llm_service),
+        "product_fit": ProductFitAgent(llm_service),
     }

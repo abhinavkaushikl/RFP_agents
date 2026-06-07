@@ -1,6 +1,6 @@
 """Section-specific RFP prompt registry.
 
-Designed for local Mistral 7B Instruct (Ollama). We pass a compact summary —
+Designed for local Qwen 2.5 7B Instruct (Ollama). We pass a compact summary —
 not full retrieved chunks — to keep prompts small and generation fast.
 """
 from __future__ import annotations

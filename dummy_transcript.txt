@@ -1,0 +1,76 @@
+Subject: Cloud Infrastructure Modernization - Discovery Call
+Client: Meridian Healthcare Systems
+Opportunity: Cloud Modernization and Managed Services RFP
+Date: 2026-05-10
+
+From: Sarah Chen <sarah.chen@meridianhealth.com>
+To: David Park <david.park@yourcompany.com>
+
+--- TRANSCRIPT START ---
+
+[00:00:12] David Park (Account Executive):
+Good morning Sarah, thanks for joining this discovery call. I know your team has been evaluating options, so I appreciate the time.
+
+[00:00:24] Sarah Chen (VP of Technology, Meridian Healthcare):
+Hi David. Yes, we're an existing customer — we've had your monitoring platform deployed across our East Coast data centers since 2023. This is about expanding the relationship.
+
+[00:00:45] David Park:
+Great. Can you walk me through what's driving this initiative?
+
+[00:01:02] Sarah Chen:
+Sure. We have 340 virtual machines running legacy workloads across three on-prem data centers. Our board has mandated a full cloud migration by end of this fiscal year. The current infrastructure costs are unsustainable — we're spending $2.8M annually just on hardware maintenance.
+
+[00:01:34] David Park:
+That's a significant driver. What does success look like for your team?
+
+[00:01:42] Sarah Chen:
+Success means 80% of production workloads running in AWS or Azure by Q4, a 35% reduction in total infrastructure spend, and zero unplanned downtime during migration. Our CISO also requires HIPAA compliance certification for every migrated workload.
+
+[00:02:15] David Park:
+Who else is involved in the decision?
+
+[00:02:20] Sarah Chen:
+Our CTO James Morrison is the executive sponsor. I'm leading the technical evaluation. Our CISO Rebecca Liu owns the compliance sign-off, and CFO Marcus Webb controls the budget. We also have Dr. Anita Patel from our clinical systems team validating that patient-facing applications remain available.
+
+[00:02:52] David Park:
+That's a well-formed buying committee. What's your timeline looking like?
+
+[00:03:01] Sarah Chen:
+This is urgent. The RFP deadline is June 15, 2026. We need proposals submitted by then. The board expects a vendor selected by end of July, and migration started in August. Our current data center lease expires in March 2027 — that's a hard deadline we cannot miss.
+
+[00:03:35] David Park:
+Understood. Are there other vendors in the evaluation?
+
+[00:03:40] Sarah Chen:
+Yes, we're also talking to Accenture and Deloitte. But honestly, since you're already embedded in our monitoring stack, there's integration value that's hard for them to replicate. We'd prefer to expand with a known partner if the proposal is competitive.
+
+[00:04:12] David Park:
+What are the key requirements you'd want addressed in our response?
+
+[00:04:18] Sarah Chen:
+Five main things:
+1. Migrate 340 VMs with near-zero downtime
+2. Provide 24x7 managed cloud operations post-migration
+3. Meet HIPAA and SOC 2 Type II compliance
+4. Integrate with our existing monitoring and alerting stack
+5. Come in under $4M total over 18 months, including migration and first year of managed services
+
+[00:05:02] David Park:
+Those are clear. Any concerns or gaps we should be aware of?
+
+[00:05:08] Sarah Chen:
+Our biggest worry is the clinical systems. We have three patient-facing applications that absolutely cannot go down. If you can show us a proven approach to live-migrating stateful healthcare workloads, that will differentiate you. Also, our internal DevOps team is small — only 6 engineers — so we need your team to handle 90% of the migration execution.
+
+[00:05:45] David Park:
+Last question — is budget formally approved?
+
+[00:05:50] Sarah Chen:
+Yes. The board approved a $4.5M envelope in the January planning cycle. Marcus just needs the final commercials to release it. This isn't a "we're exploring" situation — we are buying this quarter.
+
+[00:06:10] David Park:
+Perfect. We'll have a proposal back to you well before the June 15 deadline. I'll loop in our healthcare solutions architect for a technical deep-dive next week.
+
+[00:06:25] Sarah Chen:
+Sounds good. Looking forward to it.
+
+--- TRANSCRIPT END ---

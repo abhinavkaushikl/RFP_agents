@@ -1,30 +1,50 @@
-"""Document Matching page."""
+"""Document Matching — score an existing proposal against RFP requirements."""
 import streamlit as st
 
-from utils.theme import apply_theme, render_header, render_sidebar
+from utils.theme import (
+    apply_theme,
+    render_header,
+    render_score_gauge,
+    render_section_header,
+    render_sidebar,
+)
 
-st.set_page_config(page_title="Document Match", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Document Match · RFP.ai", page_icon="", layout="wide")
 apply_theme()
 render_sidebar()
 render_header(title="Document Match")
-st.title("Document Matching")
-st.markdown("Score an existing proposal document against RFP requirements.")
 
-# ── Input form ─────────────────────────────────────────────────────────
+# ── Hero ────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div class="rfp-hero">
+        <div class="rfp-kicker">Analysis Mode</div>
+        <h1 class="rfp-title">Document Matching</h1>
+        <p class="rfp-copy">
+            Score an existing proposal document against RFP requirements.
+            The agent pipeline structures the requirements, retrieves historical matches,
+            compares solutions, and generates a composite quality score.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Input form ──────────────────────────────────────────────────────────
 with st.form("match_form"):
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, gap="large")
     with col1:
-        st.subheader("RFP Requirements")
+        render_section_header("RFP Requirements", icon="description")
         request_text = st.text_area(
             "RFP Text",
-            height=300,
+            height=280,
             placeholder="Paste the RFP / requirements text...",
         )
     with col2:
-        st.subheader("Proposal Document")
+        render_section_header("Proposal Document", icon="article")
         document_text = st.text_area(
             "Proposal Text",
-            height=300,
+            height=280,
             placeholder="Paste the existing proposal document text...",
         )
 
@@ -34,7 +54,7 @@ with st.form("match_form"):
     )
     submitted = st.form_submit_button("Run Document Match", type="primary", use_container_width=True)
 
-# ── Execute matching ───────────────────────────────────────────────────
+# ── Execute ─────────────────────────────────────────────────────────────
 if submitted:
     if not request_text.strip() or not document_text.strip():
         st.error("Both RFP text and proposal text are required.")
@@ -42,7 +62,7 @@ if submitted:
 
     from utils.api_client import run_document_match
 
-    with st.spinner("Running document match pipeline..."):
+    with st.spinner("Running document match pipeline — structuring, retrieving, comparing, scoring..."):
         try:
             result = run_document_match(
                 request_text=request_text,
@@ -55,33 +75,32 @@ if submitted:
 
     st.success("Matching complete!")
 
-    # ── Scores ─────────────────────────────────────────────────────────
-    st.subheader("Match Scores")
+    # ── Scores ──────────────────────────────────────────────────────────
+    render_section_header("Match Quality Scores", icon="verified_user", badge="scoring agent")
     scoring = result.get("scoring", result)
-
-    col1, col2, col3 = st.columns(3)
 
     composite = scoring.get("composite_score", 0)
     req_coverage = scoring.get("requirement_coverage_score", 0)
     sol_fit = scoring.get("solution_fit_score", 0)
 
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Composite Score", f"{composite:.2f}")
-        st.progress(min(composite, 1.0))
+        render_score_gauge(composite, "Composite Score")
     with col2:
-        st.metric("Requirement Coverage", f"{req_coverage:.2f}")
-        st.progress(min(req_coverage, 1.0))
+        render_score_gauge(req_coverage, "Requirement Coverage")
     with col3:
-        st.metric("Solution Fit", f"{sol_fit:.2f}")
-        st.progress(min(sol_fit, 1.0))
+        render_score_gauge(sol_fit, "Solution Fit")
 
-    # ── Step summaries ─────────────────────────────────────────────────
+    # ── Agent Trace ─────────────────────────────────────────────────────
+    from utils.agent_trace import render_agent_trace
+    render_agent_trace(result.get("agent_trace"), title="Match Pipeline Timeline")
+
+    # ── Pipeline Steps ──────────────────────────────────────────────────
     summaries = result.get("step_summaries", [])
     if summaries:
-        with st.expander("Pipeline Steps"):
+        with st.expander("Pipeline Step Summaries"):
             for i, s in enumerate(summaries, 1):
                 st.markdown(f"**Step {i}:** {s}")
 
-    # ── Raw result ─────────────────────────────────────────────────────
     with st.expander("Raw Response"):
         st.json(result)

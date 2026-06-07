@@ -9,8 +9,8 @@ Pipeline per request:
 3. **Scrape** — for each candidate company, fetch the homepage + /about +
    /pricing pages (short timeout, plain requests + BeautifulSoup) and
    extract clean text (~3 KB total).
-4. **Mistral fallback** — if structured fields are still missing, ask the
-   local Mistral via LLMService to extract them as JSON. Strictly local —
+4. **Qwen fallback** — if structured fields are still missing, ask the
+   local Qwen via LLMService to extract them as JSON. Strictly local —
    no third-party APIs.
 """
 from __future__ import annotations
@@ -220,7 +220,7 @@ class MarketResearchService:
                 break
         return " ".join(seen_text)[:5000]
 
-    # ── LLM extraction (Mistral via Ollama) ───────────────────────────────
+    # ── LLM extraction (Qwen via Ollama) ──────────────────────────────────
     def _llm_extract(self, hit: CompanyHit) -> None:
         if not self.use_llm_extraction or not self.llm_service or not hit.scraped_text:
             return
