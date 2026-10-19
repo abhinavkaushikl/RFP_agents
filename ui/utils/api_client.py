@@ -1,150 +1,182 @@
-"""HTTP client wrapping the FastAPI backend endpoints."""
+"""HTTP client for the FastAPI backend.
+
+Configure with environment variables:
+    RFP_API_BASE_URL   default http://localhost:8000/api
+    RFP_UI_API_KEY     sent as X-API-Key when the API requires keys
+"""
 from __future__ import annotations
+
+import os
+from typing import Any
 
 import requests
 
-BASE_URL = "http://localhost:8000/api"
-TIMEOUT = 600  # Local multi-section LLM workflows can take several minutes.
+BASE_URL = os.getenv("RFP_API_BASE_URL", "http://localhost:8000/api").rstrip("/")
+API_KEY = os.getenv("RFP_UI_API_KEY", "")
+TIMEOUT = int(os.getenv("RFP_UI_TIMEOUT_S", "600"))  # multi-section runs can take minutes under rate limits
+
+
+class APIError(RuntimeError):
+    def __init__(self, message: str, status: int | None = None, retry_after: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
+
+
+def _headers() -> dict[str, str]:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
 
 
 def _url(path: str) -> str:
     return f"{BASE_URL}{path}"
 
 
-# ── Health ──────────────────────────────────────────────────────────────
+def _handle(resp: requests.Response) -> dict:
+    if resp.ok:
+        return resp.json()
+    message = f"HTTP {resp.status_code}"
+    try:
+        body = resp.json()
+        if isinstance(body.get("error"), dict):
+            message = body["error"].get("message") or message
+        elif body.get("detail"):
+            detail = body["detail"]
+            message = detail if isinstance(detail, str) else "; ".join(
+                f"{'.'.join(str(p) for p in d.get('loc', [])[1:])}: {d.get('msg')}" for d in detail
+            )
+    except ValueError:
+        message = resp.text[:300] or message
+    raise APIError(message, resp.status_code, resp.headers.get("Retry-After"))
+
+
+def _get(path: str, timeout: int = 15, **params: Any) -> dict:
+    return _handle(requests.get(_url(path), params=params or None, headers=_headers(), timeout=timeout))
+
+
+def _post(path: str, payload: dict, timeout: int = TIMEOUT) -> dict:
+    clean = {k: v for k, v in payload.items() if v not in (None, "", [], {})}
+    return _handle(requests.post(_url(path), json=clean, headers=_headers(), timeout=timeout))
+
+
+# ── Health & configuration ──────────────────────────────────────────────
 def health_check() -> dict:
-    resp = requests.get(_url("/health"), timeout=10)
-    resp.raise_for_status()
+    return _get("/health", timeout=5)
+
+
+def readiness() -> dict:
+    resp = requests.get(_url("/health/ready"), headers=_headers(), timeout=10)
     return resp.json()
 
 
-# ── Workflow Runs ───────────────────────────────────────────────────────
+def list_profiles() -> dict:
+    return _get("/profiles")
+
+
+def get_profile(name: str) -> dict:
+    return _get(f"/profiles/{name}")
+
+
+# ── Workflows ───────────────────────────────────────────────────────────
 def create_workflow_run(
     request_text: str,
-    title: str = "AIOps Proposal Request",
+    title: str = "Proposal request",
+    *,
+    client_name: str | None = None,
     industry: str | None = None,
     solution_type: str | None = None,
     user_instruction: str | None = None,
     target_sections: list[str] | None = None,
+    profile: str | None = None,
+    cache_policy: str = "use",
     metadata: dict | None = None,
 ) -> dict:
-    payload: dict = {"request_text": request_text, "title": title}
-    if industry:
-        payload["industry"] = industry
-    if solution_type:
-        payload["solution_type"] = solution_type
-    if user_instruction:
-        payload["user_instruction"] = user_instruction
-    if target_sections:
-        payload["target_sections"] = target_sections
-    if metadata:
-        payload["metadata"] = metadata
-    resp = requests.post(_url("/workflow-runs"), json=payload, timeout=TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
+    return _post("/workflow-runs", {
+        "request_text": request_text, "title": title, "client_name": client_name, "industry": industry,
+        "solution_type": solution_type, "user_instruction": user_instruction, "target_sections": target_sections,
+        "profile": profile, "cache_policy": cache_policy, "metadata": metadata,
+    })
 
 
-# ── Section Revision ────────────────────────────────────────────────────
 def revise_section(
     section_id: str,
     instruction: str,
+    *,
     section_key: str | None = None,
     base_text: str | None = None,
+    requirements: list[str] | None = None,
+    profile: str | None = None,
+    cache_policy: str = "use",
 ) -> dict:
-    payload: dict = {"instruction": instruction}
-    if section_key:
-        payload["section_key"] = section_key
-    if base_text:
-        payload["base_text"] = base_text
+    return _post(f"/generated-sections/{section_id}/revise", {
+        "instruction": instruction, "section_key": section_key, "base_text": base_text,
+        "requirements": requirements, "profile": profile, "cache_policy": cache_policy,
+    })
+
+
+def get_section_revisions(section_id: str) -> dict:
+    return _get(f"/generated-sections/{section_id}/revisions")
+
+
+def run_intent_detection(transcript_text: str, file_name: str | None = None, *, profile: str | None = None,
+                         cache_policy: str = "use") -> dict:
+    return _post("/intent-detection-runs", {"transcript_text": transcript_text, "file_name": file_name,
+                                            "profile": profile, "cache_policy": cache_policy})
+
+
+def run_market_research(offerings: list[str], requirement_summary: str = "", industry: str | None = None,
+                        max_companies: int = 8, *, profile: str | None = None) -> dict:
+    return _post("/market-research-runs", {"offerings": offerings, "requirement_summary": requirement_summary,
+                                           "industry": industry, "max_companies": max_companies, "profile": profile})
+
+
+def run_document_match(request_text: str, document_text: str, solution_type: str | None = None, *,
+                       industry: str | None = None, profile: str | None = None, cache_policy: str = "use") -> dict:
+    return _post("/document-match-runs", {"request_text": request_text, "document_text": document_text,
+                                          "solution_type": solution_type, "industry": industry,
+                                          "profile": profile, "cache_policy": cache_policy})
+
+
+# ── Knowledge base ──────────────────────────────────────────────────────
+def ingest_historical_proposals(records: list[dict], source_name: str = "ui_upload", profile: str | None = None) -> dict:
+    return _post("/historical-proposals/ingest", {"records": records, "source_name": source_name, "profile": profile})
+
+
+def upload_historical_documents(files: list[tuple[str, bytes]], *, source_name: str = "ui_upload",
+                                profile: str | None = None, client_name: str | None = None,
+                                industry: str | None = None, solution_type: str | None = None) -> dict:
+    data = {k: v for k, v in {"source_name": source_name, "profile": profile, "client_name": client_name,
+                              "industry": industry, "solution_type": solution_type}.items() if v}
     resp = requests.post(
-        _url(f"/generated-sections/{section_id}/revise"),
-        json=payload,
+        _url("/historical-proposals/upload"),
+        files=[("files", (name, content)) for name, content in files],
+        data=data,
+        headers=_headers(),
         timeout=TIMEOUT,
     )
-    resp.raise_for_status()
-    return resp.json()
+    return _handle(resp)
 
 
-# ── Intent Detection ────────────────────────────────────────────────────
-def run_intent_detection(transcript_text: str, file_name: str | None = None) -> dict:
-    payload: dict = {"transcript_text": transcript_text}
-    if file_name:
-        payload["file_name"] = file_name
-    resp = requests.post(_url("/intent-detection-runs"), json=payload, timeout=TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
-
-
-# ── Market Research ─────────────────────────────────────────────────────
-def run_market_research(
-    offerings: list[str],
-    requirement_summary: str = "",
-    industry: str | None = None,
-    max_companies: int = 8,
-) -> dict:
-    payload: dict = {
-        "offerings": offerings,
-        "requirement_summary": requirement_summary,
-        "max_companies": max_companies,
-    }
-    if industry:
-        payload["industry"] = industry
-    resp = requests.post(_url("/market-research-runs"), json=payload, timeout=TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
-
-
-# ── Document Matching ───────────────────────────────────────────────────
-def run_document_match(
-    request_text: str,
-    document_text: str,
-    solution_type: str | None = None,
-) -> dict:
-    payload: dict = {"request_text": request_text, "document_text": document_text}
-    if solution_type:
-        payload["solution_type"] = solution_type
-    resp = requests.post(_url("/document-match-runs"), json=payload, timeout=TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
-
-
-# ── Ingestion ───────────────────────────────────────────────────────────
-def ingest_historical_proposals(
-    records: list[dict],
-    source_name: str = "ui_upload",
-) -> dict:
-    payload = {"records": records, "source_name": source_name}
+def extract_text(file_name: str, content: bytes, profile: str | None = None) -> dict:
     resp = requests.post(
-        _url("/historical-proposals/ingest"), json=payload, timeout=TIMEOUT
+        _url("/documents/extract-text"),
+        files={"file": (file_name, content)},
+        data={"profile": profile} if profile else None,
+        headers=_headers(),
+        timeout=120,
     )
-    resp.raise_for_status()
-    return resp.json()
+    return _handle(resp)
 
 
-# ── Retrieval Search ────────────────────────────────────────────────────
-def retrieval_search(
-    query: str,
-    section_type: str | None = None,
-    solution_type: str | None = None,
-    industry: str | None = None,
-    top_k: int = 5,
-) -> dict:
-    payload: dict = {"query": query, "top_k": top_k}
-    if section_type:
-        payload["section_type"] = section_type
-    if solution_type:
-        payload["solution_type"] = solution_type
-    if industry:
-        payload["industry"] = industry
-    resp = requests.post(_url("/retrieval/search"), json=payload, timeout=TIMEOUT)
-    resp.raise_for_status()
-    return resp.json()
+def retrieval_search(query: str, section_type: str | None = None, solution_type: str | None = None,
+                     industry: str | None = None, top_k: int = 5, *, profile: str | None = None) -> dict:
+    return _post("/retrieval/search", {"query": query, "section_type": section_type, "solution_type": solution_type,
+                                       "industry": industry, "top_k": top_k, "profile": profile}, timeout=60)
 
 
-# ── Revision History ────────────────────────────────────────────────────
-def get_section_revisions(section_id: str) -> dict:
-    resp = requests.get(
-        _url(f"/generated-sections/{section_id}/revisions"), timeout=10
-    )
-    resp.raise_for_status()
-    return resp.json()
+# ── Usage ───────────────────────────────────────────────────────────────
+def get_usage_summary(days: int = 7) -> dict:
+    return _get("/usage/summary", days=days)
+
+
+def get_workflow_usage(workflow_id: str) -> dict:
+    return _get(f"/usage/workflows/{workflow_id}")

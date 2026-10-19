@@ -10,3 +10,6 @@ data/processed/
 data/index/
 *.pyc
 
+.env
+*.egg-info/
+out/*.pdf

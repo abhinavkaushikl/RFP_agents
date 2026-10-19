@@ -1,29 +1,30 @@
-"""Supervisor — the LLM-driven decision layer.
+"""Supervisor: the model-driven decision layer (fast tier).
 
-Four decision functions, each backed by a strict-JSON LLM call with one
-retry on parse failure and a heuristic fallback if the retry also fails:
+    pick_intent  — which workflow the payload needs (skipped when the endpoint already says)
+    make_plan    — the ordered tool calls
+    decide_next  — after a tool failure: replan / continue / abort
+    decide_done  — final check when the plan runs out without `done`
 
-    pick_intent  — picks the workflow intent from the payload
-    make_plan    — produces the ordered list of tool calls
-    decide_next  — invoked after a tool failure (replan / abort / continue)
-    decide_done  — final yes/no when the plan is exhausted
-
-Heuristic fallbacks aren't a deterministic flow — they're safety nets that
-only fire when the local LLM emits unparseable output. When Qwen works
-(the common case), every decision goes through the model.
+Each decision is a strict-JSON call with a deterministic fallback. Prompts put
+the static part (rules, tool catalog, reference plans) in the system message so
+Groq can cache it across runs; per-run facts go in the user message.
 """
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from app.agentic.state import WorkflowState
 from app.agentic.tools import Tool, tool_catalog_for_prompt
-from app.services.llm_service import LLMService, LLMServiceError
+from app.agents.schema import BOOL, STR, arr, enum, obj
+from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.llm.errors import LLMAuthError, LLMConfigurationError, LLMServiceError
+from app.llm.service import LLMService
 
+logger = get_logger(__name__)
 
-_VALID_INTENTS = (
+VALID_INTENTS = (
     "proposal_generation",
     "revision",
     "document_match",
@@ -31,59 +32,57 @@ _VALID_INTENTS = (
     "intent_detection",
 )
 
+REFERENCE_PLANS: dict[str, list[str]] = {
+    "proposal_generation": ["structure_request", "compare_solutions", "generate_proposal_sections", "score_proposal"],
+    "revision": ["retrieve_evidence", "revise_section", "validate_section"],
+    "document_match": ["structure_request", "retrieve_evidence", "compare_solutions", "score_proposal"],
+    "market_research": ["market_research"],
+    "intent_detection": ["detect_intent_fields", "frame_business_problem", "analyze_buyer_intelligence", "analyze_product_fit"],
+}
 
-# ── JSON parsing ───────────────────────────────────────────────────────────
-def _parse_json(raw: str) -> Any:
-    if not raw:
-        return None
-    candidate = raw.strip()
-    # Drop common ```json fences
-    if candidate.startswith("```"):
-        candidate = re.sub(r"^```(?:json)?", "", candidate).rstrip("`").strip()
-    # Find the outermost { ... } or [ ... ]
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start = candidate.find(opener)
-        end = candidate.rfind(closer)
-        if start >= 0 and end > start:
-            try:
-                return json.loads(candidate[start : end + 1])
-            except json.JSONDecodeError:
-                continue
+# A plan must contain every tool in `all_of` and at least one tool of each `any_of` group.
+_REQUIREMENTS: dict[str, dict[str, Any]] = {
+    "proposal_generation": {"all_of": {"structure_request"}, "any_of": [{"generate_proposal_sections", "generate_section"}]},
+    "revision": {"all_of": {"revise_section"}, "any_of": []},
+    "document_match": {"all_of": {"structure_request", "score_proposal"}, "any_of": []},
+    "market_research": {"all_of": {"market_research"}, "any_of": []},
+    "intent_detection": {"all_of": set(REFERENCE_PLANS["intent_detection"]), "any_of": []},
+}
+
+_DONE_SUMMARIES = {
+    "proposal_generation": "Proposal generated.",
+    "revision": "Section revised.",
+    "document_match": "Document scored against the request.",
+    "market_research": "Market research completed.",
+    "intent_detection": "Conversation analyzed.",
+}
+
+_FATAL = (LLMConfigurationError, LLMAuthError)
+
+
+def _json_call(llm: LLMService, *, system: str, prompt: str, schema: dict, name: str, purpose: str) -> dict | None:
     try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
+        return llm.complete_json(
+            agent="supervisor",
+            system=system,
+            prompt=prompt,
+            schema=schema,
+            schema_name=name,
+            purpose=purpose,
+            max_tokens=1500,
+            expected_tokens=250,
+            reasoning_effort="low",
+        ).parsed
+    except _FATAL:
+        raise
+    except LLMServiceError as exc:
+        logger.warning("Supervisor %s fell back to the default: %s", purpose, exc)
         return None
 
 
-def _llm_json_call(
-    llm: LLMService,
-    prompt: str,
-    *,
-    system: str = "You output strict JSON only. No prose.",
-    max_tokens: int = 350,
-) -> Any:
-    """One LLM call with one retry on JSON parse failure."""
-    try:
-        raw = llm.generate(prompt=prompt, system=system, temperature=0.0, max_tokens=max_tokens)
-    except LLMServiceError:
-        return None
-    parsed = _parse_json(raw)
-    if parsed is not None:
-        return parsed
-    fix_prompt = (
-        "Your previous response was not valid JSON:\n\n"
-        f"{raw}\n\nReturn ONLY the JSON object that matches the original schema. JSON:"
-    )
-    try:
-        raw2 = llm.generate(prompt=fix_prompt, system=system, temperature=0.0, max_tokens=max_tokens)
-    except LLMServiceError:
-        return None
-    return _parse_json(raw2)
-
-
-# ── pick_intent ────────────────────────────────────────────────────────────
+# ── pick_intent ────────────────────────────────────────────────────────
 def _heuristic_intent(payload: dict, hint: str | None) -> str:
-    if hint in _VALID_INTENTS:
+    if hint in VALID_INTENTS:
         return hint
     if payload.get("transcript_text"):
         return "intent_detection"
@@ -96,188 +95,163 @@ def _heuristic_intent(payload: dict, hint: str | None) -> str:
     return "proposal_generation"
 
 
-def pick_intent(state: WorkflowState, llm: LLMService) -> str:
+_INTENT_SYSTEM = (
+    "You route requests in a proposal platform. Choose the workflow intent from: "
+    + ", ".join(VALID_INTENTS)
+    + ". proposal_generation drafts a new response from RFP text; revision edits an existing section; "
+    "document_match scores an existing response against an RFP; market_research finds vendors for offerings; "
+    "intent_detection analyzes a sales conversation. The endpoint hint is usually right. Return JSON only."
+)
+
+
+def pick_intent(state: WorkflowState, llm: LLMService) -> tuple[str, str]:
+    """Return (intent, how) where how is 'endpoint', 'model', or 'fallback'."""
     payload = state.payload or {}
     hint = state.intent_hint
-    keys = sorted(payload.keys())
-    sample_request = (payload.get("request_text") or "")[:160]
+    if hint in VALID_INTENTS and get_settings().supervisor_trust_endpoint_intent:
+        return hint, "endpoint"
     prompt = (
-        f"Pick the workflow intent. Allowed values: {list(_VALID_INTENTS)}.\n"
-        f'Endpoint hint (may be wrong): {hint!r}\n'
-        f"Payload keys present: {keys}\n"
-        f"request_text sample: {sample_request!r}\n"
-        f"transcript_text present: {bool(payload.get('transcript_text'))}\n"
-        f"document_text present: {bool(payload.get('document_text'))}\n"
-        f"offerings present: {bool(payload.get('offerings'))}\n"
-        f'instruction present: {bool(payload.get("instruction"))}\n\n'
-        'Respond with JSON: {"intent": "<one of the allowed values>"}'
+        f"Endpoint hint: {hint!r}\n"
+        f"Payload keys: {sorted(payload.keys())}\n"
+        f"request_text sample: {(payload.get('request_text') or '')[:200]!r}"
     )
-    parsed = _llm_json_call(llm, prompt, max_tokens=80)
-    if isinstance(parsed, dict):
-        candidate = str(parsed.get("intent", "")).strip().lower()
-        if candidate in _VALID_INTENTS:
-            return candidate
-    return _heuristic_intent(payload, hint)
+    parsed = _json_call(
+        llm, system=_INTENT_SYSTEM, prompt=prompt,
+        schema=obj(intent=enum(*VALID_INTENTS)), name="intent", purpose="pick_intent",
+    )
+    if parsed and parsed.get("intent") in VALID_INTENTS:
+        return parsed["intent"], "model"
+    return _heuristic_intent(payload, hint), "fallback"
 
 
-# ── make_plan ──────────────────────────────────────────────────────────────
-def _fallback_plan(intent: str, state: WorkflowState) -> list[dict]:
-    """Hard-coded plan templates per intent — only used if LLM plan fails to parse."""
-    if intent == "proposal_generation":
-        return [
-            {"tool": "structure_request", "args": {}},
-            {"tool": "compare_solutions", "args": {}},
-            {"tool": "generate_proposal_sections", "args": {}},
-            {"tool": "score_proposal", "args": {}},
-            {"tool": "done", "args": {"summary": "Proposal generated."}},
-        ]
-    if intent == "revision":
-        return [
-            {"tool": "retrieve_evidence", "args": {"section_type": "implementation_plan", "top_k": 5}},
-            {"tool": "revise_section", "args": {}},
-            {"tool": "done", "args": {"summary": "Section revised."}},
-        ]
-    if intent == "document_match":
-        return [
-            {"tool": "structure_request", "args": {}},
-            {"tool": "retrieve_evidence", "args": {"top_k": 5}},
-            {"tool": "compare_solutions", "args": {}},
-            {"tool": "score_proposal", "args": {"retrieval_score_hint": 0.75}},
-            {"tool": "done", "args": {"summary": "Document scored against request."}},
-        ]
-    if intent == "market_research":
-        return [
-            {"tool": "market_research", "args": {}},
-            {"tool": "done", "args": {"summary": "Market research completed."}},
-        ]
-    if intent == "intent_detection":
-        return [
-            {"tool": "detect_intent_fields", "args": {}},
-            {"tool": "frame_business_problem", "args": {}},
-            {"tool": "analyze_buyer_intelligence", "args": {}},
-            {"tool": "analyze_product_fit", "args": {}},
-            {"tool": "done", "args": {"summary": "Intent, problem framing, buyer intelligence, and product fit extracted."}},
-        ]
-    return [{"tool": "done", "args": {"summary": "No plan available."}}]
+# ── make_plan ──────────────────────────────────────────────────────────
+def _fallback_plan(intent: str) -> list[dict]:
+    steps = [{"tool": name, "args": {}} for name in REFERENCE_PLANS.get(intent, [])]
+    return steps + [{"tool": "done", "args": {"summary": _DONE_SUMMARIES.get(intent, "Workflow completed.")}}]
 
 
 def _validate_plan(steps: list[dict], tools: dict[str, Tool]) -> list[dict]:
-    """Drop unknown tools, ensure plan ends with done, cap length."""
     cleaned: list[dict] = []
     for raw in steps[:10]:
         if not isinstance(raw, dict):
             continue
         name = str(raw.get("tool", "")).strip()
-        args = raw.get("args", {})
+        args = raw.get("args")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except json.JSONDecodeError:
+                args = {}
         if not isinstance(args, dict):
             args = {}
-        if name == "done" or name in tools:
+        if name == "done":
+            cleaned.append({"tool": "done", "args": args})
+            break
+        if name in tools:
             cleaned.append({"tool": name, "args": args})
     if not cleaned or cleaned[-1]["tool"] != "done":
         cleaned.append({"tool": "done", "args": {"summary": "Workflow completed."}})
     return cleaned
 
 
-def make_plan(state: WorkflowState, llm: LLMService, tools: dict[str, Tool]) -> list[dict]:
-    intent = state.intent or "proposal_generation"
-    catalog = tool_catalog_for_prompt(tools)
-    payload = state.payload or {}
-    payload_keys = sorted(payload.keys())
-    prior_results = sorted(state.results.keys())
+def plan_satisfies(intent: str, tool_names: list[str]) -> bool:
+    rule = _REQUIREMENTS.get(intent)
+    if not rule:
+        return True
+    names = set(tool_names)
+    return rule["all_of"] <= names and all(names & group for group in rule["any_of"])
 
-    intent_examples = {
-        "proposal_generation": (
-            '[{"tool":"structure_request","args":{}},'
-            '{"tool":"compare_solutions","args":{}},'
-            '{"tool":"generate_proposal_sections","args":{}},'
-            '{"tool":"score_proposal","args":{}},'
-            '{"tool":"done","args":{"summary":"Proposal generated."}}]'
-        ),
-        "revision": (
-            '[{"tool":"retrieve_evidence","args":{}},'
-            '{"tool":"revise_section","args":{}},'
-            '{"tool":"done","args":{"summary":"Section revised."}}]'
-        ),
-        "document_match": (
-            '[{"tool":"structure_request","args":{}},'
-            '{"tool":"retrieve_evidence","args":{}},'
-            '{"tool":"compare_solutions","args":{}},'
-            '{"tool":"score_proposal","args":{}},'
-            '{"tool":"done","args":{"summary":"Document scored."}}]'
-        ),
-        "market_research": (
-            '[{"tool":"market_research","args":{}},'
-            '{"tool":"done","args":{"summary":"Market research completed."}}]'
-        ),
-        "intent_detection": (
-            '[{"tool":"detect_intent_fields","args":{}},'
-            '{"tool":"frame_business_problem","args":{}},'
-            '{"tool":"analyze_buyer_intelligence","args":{}},'
-            '{"tool":"analyze_product_fit","args":{}},'
-            '{"tool":"done","args":{"summary":"Intent, problem framing, buyer intelligence, and product fit extracted."}}]'
-        ),
-    }
-    example = intent_examples.get(intent, "")
-    prompt = (
-        f"You are an agentic workflow planner. Intent: {intent}.\n\n"
+
+def _plan_system(tools: dict[str, Tool]) -> str:
+    refs = "\n".join(f"- {intent}: {' → '.join(plan)} → done" for intent, plan in REFERENCE_PLANS.items())
+    return (
+        "You are the planner of an agentic proposal platform. Produce the ordered list of tool calls for the intent.\n\n"
         "AVAILABLE TOOLS:\n"
-        f"{catalog}\n"
-        '- done: terminator. args={"summary":"<short>"}\n\n'
-        f"Payload keys: {payload_keys}\n"
-        f"Tools already executed: {prior_results}\n\n"
+        f"{tool_catalog_for_prompt(tools)}\n"
+        "- done: terminator; args {\"summary\": \"<short>\"}\n\n"
         "RULES:\n"
-        "- Use the FEWEST tools needed for this intent. Do NOT chain unrelated tools.\n"
-        "- Do NOT call generate_proposal_sections unless the intent is proposal_generation.\n"
-        "- Args can be {} — tools auto-fill from prior results.\n"
-        "- Always end with the done tool.\n\n"
-        f"Reference plan for this intent (you may copy or adjust): {example}\n\n"
-        'Respond with JSON: {"steps": [{"tool":"<name>","args":{...}}, ...]}'
+        "- Use the fewest tools the intent needs; never chain tools from another intent.\n"
+        "- Tools auto-fill arguments from earlier results; pass args only to override (as a JSON object string, or \"{}\").\n"
+        "- Skip tools listed as already executed unless they failed.\n"
+        "- Always end with done.\n\n"
+        "REFERENCE PLANS (copy unless the payload needs something different):\n"
+        f"{refs}\n"
+        "Return JSON only."
     )
-    parsed = _llm_json_call(llm, prompt, max_tokens=420)
-    if isinstance(parsed, dict) and isinstance(parsed.get("steps"), list):
-        return _validate_plan(parsed["steps"], tools)
-    return _fallback_plan(intent, state)
 
 
-# ── decide_next (after tool failure) ───────────────────────────────────────
+_PLAN_SCHEMA = obj(steps=arr(obj(tool=STR, args=STR)))
+
+
+def make_plan(state: WorkflowState, llm: LLMService, tools: dict[str, Tool]) -> tuple[list[dict], str]:
+    """Return (plan, how) where how is 'model' or 'reference'."""
+    intent = state.intent or "proposal_generation"
+    if not get_settings().supervisor_llm_planning:
+        return _fallback_plan(intent), "reference"
+    executed_ok = [name for name, res in state.results.items() if res.get("ok")]
+    failed = state.failed_tools()
+    prompt = (
+        f"Intent: {intent}\n"
+        f"Payload keys: {sorted((state.payload or {}).keys())}\n"
+        f"Target sections: {(state.payload or {}).get('target_sections') or 'profile defaults'}\n"
+        f"Already executed: {executed_ok}\n"
+        f"Failed so far: {failed}\n"
+        f"Last error: {state.last_error or 'none'}"
+    )
+    parsed = _json_call(llm, system=_plan_system(tools), prompt=prompt, schema=_PLAN_SCHEMA, name="plan", purpose="make_plan")
+    if parsed and isinstance(parsed.get("steps"), list):
+        plan = _validate_plan(parsed["steps"], tools)
+        names = [s["tool"] for s in plan] + executed_ok
+        if plan_satisfies(intent, names):
+            return plan, "model"
+        logger.info("Model plan for %s missed required tools; using the reference plan", intent)
+    plan = _fallback_plan(intent)
+    if executed_ok:
+        plan = [s for s in plan if s["tool"] not in executed_ok or s["tool"] == "done"]
+    return plan, "reference"
+
+
+# ── decide_next ────────────────────────────────────────────────────────
+_NEXT_SYSTEM = (
+    "A tool failed in an agentic proposal workflow. Decide: \"replan\" to build a new plan, \"continue\" to skip "
+    "the failed step, or \"abort\" to stop. Abort when the failure makes the result meaningless (for example the "
+    "request could not be structured); continue when later steps can still produce a useful result. Return JSON only."
+)
+
+
 def decide_next(state: WorkflowState, llm: LLMService, tools: dict[str, Tool]) -> dict:
     if state.replans >= state.max_replans:
-        return {"action": "abort", "reason": "max replans exhausted"}
-    error = state.last_error or "unknown error"
+        return {"action": "abort", "reason": "max replans exhausted", "how": "rule"}
     last_tool = state.trace[-1].get("tool", "") if state.trace else ""
-    pending = [s.get("tool") for s in state.plan]
     prompt = (
-        f"A tool just failed in an agentic workflow.\n"
-        f"Intent: {state.intent}\n"
-        f"Last tool: {last_tool}\n"
-        f"Error: {error}\n"
-        f"Pending plan: {pending}\n\n"
-        'Decide: {"action": "replan"} to redo the plan, '
-        '{"action": "continue"} to skip the failed step and keep going, '
-        '{"action": "abort", "reason": "<short>"} to stop.\n\n'
-        "JSON:"
+        f"Intent: {state.intent}\nFailed tool: {last_tool}\nError: {state.last_error or 'unknown'}\n"
+        f"Remaining plan: {[s.get('tool') for s in state.plan]}"
     )
-    parsed = _llm_json_call(llm, prompt, max_tokens=120)
-    if isinstance(parsed, dict):
-        action = str(parsed.get("action", "")).strip().lower()
-        if action in ("replan", "continue", "abort"):
-            return {"action": action, "reason": parsed.get("reason", "")}
-    return {"action": "continue", "reason": "fallback: skip failed step"}
+    parsed = _json_call(
+        llm, system=_NEXT_SYSTEM, prompt=prompt,
+        schema=obj(action=enum("replan", "continue", "abort"), reason=STR), name="next_action", purpose="decide_next",
+    )
+    if parsed and parsed.get("action") in ("replan", "continue", "abort"):
+        return {"action": parsed["action"], "reason": parsed.get("reason", ""), "how": "model"}
+    return {"action": "continue", "reason": "fallback: skip failed step", "how": "fallback"}
 
 
-# ── decide_done ────────────────────────────────────────────────────────────
+# ── decide_done ────────────────────────────────────────────────────────
+_DONE_SYSTEM = (
+    "Decide whether an agentic proposal workflow produced an acceptable result from the steps it ran. "
+    "Return JSON with done (boolean) and a one-sentence summary."
+)
+
+
 def decide_done(state: WorkflowState, llm: LLMService) -> dict:
-    summaries = state.tool_summaries()[-6:]
-    prompt = (
-        f"Intent: {state.intent}\n"
-        f"Steps executed:\n" + "\n".join(f"- {s}" for s in summaries) + "\n\n"
-        'Is the workflow complete and acceptable? '
-        'Respond with JSON: {"done": true|false, "summary": "<one short sentence>"}'
+    summaries = state.tool_summaries()[-8:]
+    if not state.failed_tools() and summaries:
+        return {"done": True, "summary": _DONE_SUMMARIES.get(state.intent or "", "Workflow completed."), "how": "rule"}
+    prompt = f"Intent: {state.intent}\nSteps executed:\n" + "\n".join(f"- {s}" for s in summaries)
+    parsed = _json_call(
+        llm, system=_DONE_SYSTEM, prompt=prompt,
+        schema=obj(done=BOOL, summary=STR), name="done_check", purpose="decide_done",
     )
-    parsed = _llm_json_call(llm, prompt, max_tokens=100)
-    if isinstance(parsed, dict) and "done" in parsed:
-        return {
-            "done": bool(parsed["done"]),
-            "summary": str(parsed.get("summary", "Workflow completed.")),
-        }
-    return {"done": True, "summary": "Workflow completed (fallback)."}
+    if parsed and "done" in parsed:
+        return {"done": bool(parsed["done"]), "summary": str(parsed.get("summary") or "Workflow completed."), "how": "model"}
+    return {"done": bool(summaries), "summary": "Workflow completed (fallback).", "how": "fallback"}

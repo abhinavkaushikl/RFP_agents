@@ -1,0 +1,66 @@
+# Full stack: Postgres + pgvector, Redis, and the API, which also serves the web app.
+#   cp .env.example .env   # add RFP_GROQ_API_KEY
+#   docker compose up --build        → http://localhost:8000
+#   docker compose --profile legacy up   also starts the old Streamlit UI on :8501
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: rfp
+      POSTGRES_PASSWORD: rfp
+      POSTGRES_DB: proposal_platform
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rfp -d proposal_platform"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      RFP_DATABASE_URL: postgresql+psycopg://rfp:rfp@postgres:5432/proposal_platform
+      RFP_REDIS_URL: redis://redis:6379/0
+      RFP_REDIS_REQUIRED: "true"
+      RFP_ENVIRONMENT: production
+      RFP_LOG_JSON: "true"
+      RFP_CORS_ORIGINS: http://localhost:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/api/health"]
+      interval: 10s
+      retries: 6
+
+  ui-legacy:
+    profiles: ["legacy"]
+    build: .
+    env_file: .env
+    environment:
+      RFP_API_BASE_URL: http://api:8000/api
+    command: ["sh", "-c", "pip install --user --no-cache-dir 'streamlit>=1.35' pandas && exec python -m streamlit run ui/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true"]
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

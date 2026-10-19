@@ -10,8 +10,8 @@ class OrchestrationService:
     def run_proposal(self, payload: dict) -> dict:
         return self.orchestrator.run_proposal_workflow(payload)
 
-    def run_revision(self, payload: dict, base_section: dict) -> dict:
-        return self.orchestrator.run_revision_workflow(payload, base_section)
+    def run_revision(self, payload: dict, section_id: str) -> dict:
+        return self.orchestrator.run_revision_workflow(payload, section_id)
 
     def run_document_match(self, payload: dict) -> dict:
         return self.orchestrator.run_document_match_workflow(payload)

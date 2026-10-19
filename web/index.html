@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#15171c" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // Apply the saved theme before first paint. ?theme=light|dark|system also sets it.
+      (function () {
+        var root = document.documentElement;
+        try {
+          var key = "rfp.theme";
+          var asked = new URLSearchParams(location.search).get("theme");
+          if (asked && /^(light|dark|system)$/.test(asked)) localStorage.setItem(key, asked);
+          var pref = localStorage.getItem(key) || "dark";
+          var light = pref === "light" || (pref === "system" && matchMedia("(prefers-color-scheme: light)").matches);
+          root.dataset.theme = light ? "light" : "dark";
+        } catch (e) {
+          root.dataset.theme = "dark";
+        }
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Proposal Studio</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

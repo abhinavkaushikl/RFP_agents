@@ -1,22 +1,22 @@
 """End-to-end RFP proposal generator: input details -> full agent workflow -> PDF.
 
-Runs the 8-agent pipeline on the supplied RFP brief, calls Mistral via Ollama
-for each section's prose, and renders a professional, executive-grade PDF.
+Runs the multi-agent workflow on an RFP brief (Groq models, pgvector precedent),
+prints the token-usage report, and renders an executive-grade PDF.
 
 Usage:
 
     # JSON config mode (recommended)
     PYTHONPATH=src python3 scripts/generate_rfp.py \\
         --config configs/sample_rfp_input.json \\
-        --output out/vodafone_rfp.pdf
+        --output out/northwind_wms_proposal.pdf
 
     # Quick CLI mode
     PYTHONPATH=src python3 scripts/generate_rfp.py \\
-        --title "AIOps Modernization for Vodafone India" \\
-        --client "Vodafone India" \\
-        --industry "Telecommunications" \\
-        --request-text "Vodafone India operates a heterogeneous network..." \\
-        --output out/vodafone_rfp.pdf
+        --title "Warehouse Management System" \\
+        --client "Northwind Foods" \\
+        --request-text "Northwind Foods is seeking a cloud WMS..." \\
+        --profile default \\
+        --output out/proposal.pdf
 """
 from __future__ import annotations
 
@@ -48,29 +48,17 @@ from app.orchestration.orchestrator import ProposalWorkflowOrchestrator
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
 from app.services.retrieval_service import RetrievalService
+from app.services.run_store import RunStore
 
-# ── Defaults ─────────────────────────────────────────────────────────
-DEFAULT_SECTIONS = [
-    "executive_summary",
-    "deal_storytelling",
-    "competitor_positioning",
-    "architecture_diagram",
-    "implementation_plan",
-    "pricing_notes",
-    "financials",
-    "contract_annexure",
-]
+# ── Defaults (from the domain profile) ──────────────────────────────
+from app.domain.profile import load_profile  # noqa: E402
 
-SECTION_TITLES = {
-    "executive_summary": "Executive Summary",
-    "deal_storytelling": "Engagement Narrative",
-    "competitor_positioning": "Competitive Positioning",
-    "architecture_diagram": "Solution Architecture",
-    "implementation_plan": "Implementation Plan",
-    "pricing_notes": "Pricing & Commercials",
-    "financials": "Financial Benefits & Business Case",
-    "contract_annexure": "Contractual Terms & SLA Annexure",
-}
+_PROFILE = load_profile()
+DEFAULT_SECTIONS = _PROFILE.resolved_default_sections()
+
+
+def _title(key: str) -> str:
+    return _PROFILE.section_title(key)
 
 # ── Color palette (corporate navy + slate) ───────────────────────────
 NAVY = HexColor("#0F2C4D")
@@ -351,9 +339,9 @@ def build_compliance_matrix(requirements: list[str], sections: list[dict]) -> li
             text = str(sec.get("draft_text", "")).lower()
             head = req_lower[:24]
             if head and head in text:
-                addressed.append(SECTION_TITLES.get(sec["section_key"], sec["section_key"]))
+                addressed.append(_title(sec["section_key"]))
         if not addressed:
-            addressed = ["Executive Summary"]
+            addressed = ["(not explicitly addressed)"]
         rows.append([str(i), req[:120], ", ".join(addressed[:2])])
     return rows
 
@@ -368,7 +356,7 @@ def render_cover(
     industry: str,
     solution_type: str,
     workflow_id: str,
-    composite_score: float,
+    composite_score: float | None,
 ) -> None:
     flow.append(Spacer(1, 4 * cm))
     flow.append(Paragraph("RFP RESPONSE DOCUMENT", styles["cover_overline"]))
@@ -376,7 +364,7 @@ def render_cover(
     flow.append(HRFlowable(width="35%", thickness=2, color=ACCENT, spaceBefore=4, spaceAfter=14))
     flow.append(Paragraph(f"Prepared for <b>{_safe(client)}</b>", styles["cover_subtitle"]))
     flow.append(Spacer(1, 0.4 * cm))
-    flow.append(Paragraph("Prepared by the AIOps Solutions Practice", styles["cover_prepared"]))
+    flow.append(Paragraph(f"Prepared by {_safe(_PROFILE.organization.name.title())}", styles["cover_prepared"]))
 
     flow.append(Spacer(1, 3 * cm))
 
@@ -391,7 +379,7 @@ def render_cover(
         [Paragraph("Workflow Reference", styles["cover_meta_label"]), Paragraph(_safe(workflow_id[:8]), styles["cover_meta_value"])],
         [
             Paragraph("Quality Composite", styles["cover_meta_label"]),
-            Paragraph(f"<b>{composite_score:.2f}</b> / 1.00", styles["cover_meta_value"]),
+            Paragraph(f"<b>{(composite_score or 0):.2f}</b> / 1.00", styles["cover_meta_value"]),
         ],
     ]
     table = Table(meta_rows, colWidths=[5 * cm, 11 * cm])
@@ -412,7 +400,7 @@ def render_toc(flow: list, styles: dict[str, ParagraphStyle], section_order: lis
     flow.append(Paragraph("Table of Contents", styles["h1"]))
     flow.append(HRFlowable(width="100%", thickness=0.4, color=NAVY, spaceAfter=10))
     items = ["Engagement Brief", "Compliance Matrix"]
-    items += [SECTION_TITLES.get(k, k.replace("_", " ").title()) for k in section_order]
+    items += [_title(k) for k in section_order]
     items += ["Validation & Quality Scores", "Pipeline Trace"]
     for i, name in enumerate(items, 1):
         flow.append(Paragraph(f"{i:>2}. &nbsp;&nbsp;{_safe(name)}", styles["toc_entry"]))
@@ -438,11 +426,11 @@ def render_engagement_brief(
 
     vendors = request.get("vendors", [])
     if vendors:
-        flow.append(Paragraph("Vendor Environment", styles["h2"]))
+        flow.append(Paragraph("Systems and Vendors Mentioned", styles["h2"]))
         flow.append(Paragraph(_safe(", ".join(vendors)), styles["body"]))
 
     if solution.get("matching_offerings"):
-        flow.append(Paragraph("Solution Family Mapping", styles["h2"]))
+        flow.append(Paragraph("Relevant Offerings", styles["h2"]))
         for off in solution["matching_offerings"]:
             flow.append(Paragraph(f"• {_safe(off)}", styles["bullet"]))
 
@@ -503,7 +491,7 @@ def render_section(
     section: dict,
 ) -> None:
     section_key = section["section_key"]
-    title = SECTION_TITLES.get(section_key, section_key.replace("_", " ").title())
+    title = section.get("title") or _title(section_key)
 
     flow.append(Paragraph(f"SECTION {section_index:02d}", styles["section_kicker"]))
     flow.append(Paragraph(_safe(title), styles["section_h"]))
@@ -530,6 +518,10 @@ def render_section(
     flow.append(Paragraph(" &nbsp;|&nbsp; ".join(footer_bits), styles["meta"]))
 
 
+def _fmt(value) -> str:
+    return "n/a" if value is None else f"{float(value):.2f}"
+
+
 def render_quality_scores(
     flow: list, styles: dict[str, ParagraphStyle], scores: dict
 ) -> None:
@@ -544,27 +536,27 @@ def render_quality_scores(
         ],
         [
             Paragraph("Composite", styles["table_cell"]),
-            Paragraph(f"<b>{scores.get('composite_score', 0):.2f}</b>", styles["table_cell"]),
+            Paragraph(f"<b>{_fmt(scores.get('composite_score'))}</b>", styles["table_cell"]),
             Paragraph("Overall response quality", styles["table_cell"]),
         ],
         [
             Paragraph("Requirement Coverage", styles["table_cell"]),
-            Paragraph(f"{scores.get('requirement_coverage_score', 0):.2f}", styles["table_cell"]),
+            Paragraph(_fmt(scores.get('requirement_coverage_score')), styles["table_cell"]),
             Paragraph("Fraction of stated requirements addressed in the response", styles["table_cell"]),
         ],
         [
             Paragraph("Solution Fit", styles["table_cell"]),
-            Paragraph(f"{scores.get('solution_fit_score', 0):.2f}", styles["table_cell"]),
+            Paragraph(_fmt(scores.get('solution_fit_score')), styles["table_cell"]),
             Paragraph("Alignment with chosen solution family", styles["table_cell"]),
         ],
         [
             Paragraph("Historical Similarity", styles["table_cell"]),
-            Paragraph(f"{scores.get('historical_similarity_score', 0):.2f}", styles["table_cell"]),
+            Paragraph(_fmt(scores.get('historical_similarity_score')), styles["table_cell"]),
             Paragraph("Match against precedent retrieved from the corpus", styles["table_cell"]),
         ],
         [
             Paragraph("Completeness", styles["table_cell"]),
-            Paragraph(f"{scores.get('completeness_score', 0):.2f}", styles["table_cell"]),
+            Paragraph(_fmt(scores.get('completeness_score')), styles["table_cell"]),
             Paragraph("All target sections present and populated", styles["table_cell"]),
         ],
     ]
@@ -620,7 +612,7 @@ def render_pdf(
         topMargin=2 * cm,
         bottomMargin=2 * cm,
         title=title,
-        author="RFP-LLM Platform",
+        author="RFP Proposal Platform",
     )
 
     flow: list = []
@@ -633,7 +625,7 @@ def render_pdf(
         industry=industry,
         solution_type=solution_type,
         workflow_id=workflow_result["workflow_id"],
-        composite_score=workflow_result["scores"]["composite_score"],
+        composite_score=(workflow_result.get("scores") or {}).get("composite_score"),
     )
     flow.append(PageBreak())
 
@@ -656,11 +648,11 @@ def render_pdf(
     render_compliance_matrix(flow, styles, matrix)
     flow.append(PageBreak())
 
-    for i, section in enumerate(workflow_result["sections"], 1):
+    for i, section in enumerate([s for s in workflow_result["sections"] if not s.get("error")], 1):
         render_section(flow, styles, section_index=i, section=section)
         flow.append(PageBreak())
 
-    render_quality_scores(flow, styles, workflow_result["scores"])
+    render_quality_scores(flow, styles, workflow_result.get("scores") or {})
     flow.append(PageBreak())
 
     render_pipeline_trace(flow, styles, workflow_result.get("step_summaries", []))
@@ -673,15 +665,29 @@ def run_workflow(payload: dict) -> dict:
     db = SessionLocal()
     try:
         embedding_service = EmbeddingService()
-        retrieval_service = RetrievalService(db=db, embedding_service=embedding_service)
-        llm_service = LLMService()
         orchestrator = ProposalWorkflowOrchestrator(
-            retrieval_service=retrieval_service,
-            llm_service=llm_service,
+            retrieval_service=RetrievalService(db=db, embedding_service=embedding_service),
+            llm_service=LLMService(),
+            embedding_service=embedding_service,
+            run_store=RunStore(db),
         )
         return orchestrator.run_proposal_workflow(payload)
     finally:
         db.close()
+
+
+def print_usage(report: dict) -> None:
+    totals = report.get("totals") or {}
+    print("Token usage")
+    print(f"  total tokens       : {totals.get('total_tokens', 0):,} "
+          f"(prompt {totals.get('prompt_tokens', 0):,}, cached {totals.get('cached_prompt_tokens', 0):,}, "
+          f"completion {totals.get('completion_tokens', 0):,})")
+    print(f"  model calls        : {totals.get('model_calls', 0)}  cache hits: {totals.get('cache_hits', 0)} "
+          f"(saved {totals.get('saved_tokens', 0):,} tokens)")
+    print(f"  estimated cost     : ${totals.get('cost_usd', 0):.4f}")
+    for row in report.get("by_section", []):
+        print(f"    - {row['section_key']:<28} {row['total_tokens']:>7,} tokens  ${row['cost_usd']:.4f}"
+              + ("  (cache)" if row.get("cache_hits") else ""))
 
 
 def load_config(config_path: Path) -> dict:
@@ -696,8 +702,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, help="Path to JSON file with RFP details")
     parser.add_argument("--title", help="Proposal title")
     parser.add_argument("--client", help="Client / customer name")
-    parser.add_argument("--industry", default="Telecommunications", help="Industry vertical")
-    parser.add_argument("--solution-type", default="aiops_general", help="Solution type code")
+    parser.add_argument("--industry", default=None, help="Industry (inferred from the RFP when omitted)")
+    parser.add_argument("--solution-type", default=None, help="Offering code or solution label (inferred when omitted)")
+    parser.add_argument("--profile", default=None, help="Domain profile name (default: RFP_DEFAULT_PROFILE)")
+    parser.add_argument("--refresh", action="store_true", help="Regenerate instead of reusing cached sections")
     parser.add_argument("--request-text", help="Raw RFP / requirements text")
     parser.add_argument(
         "--sections",
@@ -718,11 +726,14 @@ def main() -> int:
     args = parse_args()
 
     config = load_config(args.config) if args.config else {}
+    global _PROFILE
+    if args.profile or config.get("profile"):
+        _PROFILE = load_profile(args.profile or config.get("profile"))
 
     title = args.title or config.get("title")
     client = args.client or config.get("client")
-    industry = args.industry or config.get("industry", "Telecommunications")
-    solution_type = args.solution_type or config.get("solution_type", "aiops_general")
+    industry = args.industry or config.get("industry")
+    solution_type = args.solution_type or config.get("solution_type")
     request_text = args.request_text or config.get("request_text")
     sections = (
         args.sections if args.sections != DEFAULT_SECTIONS else config.get("sections", DEFAULT_SECTIONS)
@@ -738,35 +749,41 @@ def main() -> int:
     payload = {
         "request_text": request_text,
         "title": title,
+        "client_name": client,
         "industry": industry,
         "solution_type": solution_type,
         "target_sections": sections,
+        "profile": args.profile or config.get("profile"),
+        "cache_policy": "refresh" if args.refresh else "use",
         "metadata": {"client_name": client},
     }
 
     print(f"Running RFP workflow for: {title}")
     print(f"  client    : {client}")
-    print(f"  industry  : {industry}")
+    print(f"  industry  : {industry or '(inferred)'}")
     print(f"  sections  : {len(sections)}")
     print()
-    print("Generating sections via Mistral (Ollama). First section may take ~10s...")
+    print("Generating sections with Groq (cached sections are reused)...")
 
     result = run_workflow(payload)
     print()
     print(f"Workflow completed: {result['workflow_id']}")
-    print(f"  composite score    : {result['scores']['composite_score']:.2f}")
+    print(f"  status             : {result['status']}")
+    print(f"  composite score    : {_fmt((result.get('scores') or {}).get('composite_score'))}")
     print(f"  sections generated : {len(result['sections'])}")
     for sec in result["sections"]:
         chars = len(str(sec.get("draft_text", "")))
-        print(f"    - {sec['section_key']}: {chars} chars")
+        print(f"    - {sec['section_key']}: {chars} chars" + (f"  ERROR {sec['error']}" if sec.get("error") else ""))
+    print()
+    print_usage(result.get("token_usage") or {})
     print()
     print(f"Rendering PDF to: {args.output}")
     render_pdf(
         output_path=args.output,
         title=title,
         client=client,
-        industry=industry,
-        solution_type=solution_type,
+        industry=(result.get("request") or {}).get("industry") or industry or "Unspecified",
+        solution_type=(result.get("request") or {}).get("solution_type") or solution_type or "general",
         workflow_result=result,
     )
     print(f"Done: {args.output.resolve()}")

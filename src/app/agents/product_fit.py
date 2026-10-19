@@ -1,153 +1,85 @@
-"""Product Fit Agent — capability fit, gaps, and sales positioning analysis."""
+"""Product fit: how well our offerings fit what the buyer described (frontier model).
+
+The fit is judged against the profile's offering catalog when one exists, and
+against the solution discussed in the conversation otherwise. Capability areas
+and gap types come from the profile.
+"""
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from app.agents.base import PlatformAgent
+from app.agents.normalize import as_list, as_text_list, clamp_float, clamp_int, clean_text, normalize_choice
+from app.agents.schema import NUM, STR, arr, enum, obj
+from app.agents.transcript import transcript_messages
+from app.domain.profile import DomainProfile, load_profile
+from app.llm.errors import LLMServiceError
+from app.llm.service import LLMService
 from app.schemas.domain import AgentContext, AgentResult
-from app.services.llm_service import LLMService, LLMServiceError
+
+STRENGTHS = ("Weak", "Moderate", "Strong")
+SEVERITIES = ("Low", "Medium", "High", "Critical")
+_WORD = re.compile(r"[a-z0-9]+")
 
 
-FIT_STAGES = (
-    "Poor Fit",
-    "Partial Fit",
-    "Qualified Fit",
-    "Strong Fit",
-    "Strategic Fit",
-)
-
-FIT_STRENGTHS = ("Weak", "Moderate", "Strong")
-
-PRODUCT_GAP_TYPES = (
-    "Capability Gap",
-    "Integration Gap",
-    "Compliance Gap",
-    "Performance/Scale Gap",
-    "Services/Delivery Gap",
-    "Commercial Fit Gap",
-    "Competitive Differentiation Gap",
-    "Operational Readiness Gap",
-)
-
-CAPABILITY_AREAS = (
-    "Cloud Migration",
-    "Managed Services",
-    "AIOps/Monitoring",
-    "Security/Compliance",
-    "Integration",
-    "Automation",
-    "Analytics/Reporting",
-    "Implementation Support",
-)
+def _schema(p: DomainProfile) -> dict[str, Any]:
+    pf = p.product_fit
+    return obj(
+        product_fit_score=NUM,
+        fit_stage=enum(*[s.name for s in pf.fit_stages]),
+        confidence=NUM,
+        fit_summary=STR,
+        matched_capabilities=arr(
+            obj(
+                buyer_need=STR,
+                matched_capability=STR,
+                capability_area=enum(*pf.capability_areas),
+                fit_strength=enum(*STRENGTHS),
+                evidence=STR,
+            )
+        ),
+        product_gaps=arr(obj(gap_type=enum(*pf.gap_types), severity=enum(*SEVERITIES), description=STR, recommendation=STR)),
+        integration_fit=obj(score=NUM, summary=STR, required_integrations=arr(STR), risks=arr(STR)),
+        competitive_positioning=obj(competitors_mentioned=arr(STR), differentiators=arr(STR), positioning_summary=STR),
+        risk_flags=arr(STR),
+        recommended_positioning=arr(STR),
+        recommended_next_actions=arr(STR),
+    )
 
 
-SYSTEM_PROMPT = (
-    "You are a Product Fit Intelligence Engine for enterprise sales teams. "
-    "Analyze customer conversations and determine how well the proposed solution "
-    "fits the buyer's stated needs. Extract capability matches, fit gaps, "
-    "integration fit, competitive context, risks, and recommended positioning. "
-    "Ground every claim in the transcript. Do not invent product capabilities, "
-    "customers, integrations, compliance status, pricing, or commitments."
-)
-
-EXTRACTION_PROMPT = """Analyze the transcript and produce structured product-fit intelligence.
-
-Evaluate:
-- Buyer requirements and use cases
-- Requested technical capabilities
-- Integration needs
-- Security and compliance expectations
-- Delivery and support expectations
-- Competitive context
-- Fit blockers or proof points required
-- Positioning and next-best sales actions
-
-Allowed fit stages:
-{fit_stages}
-
-Allowed product gap types:
-{gap_types}
-
-Capability areas:
-{capability_areas}
-
-Return ONLY valid JSON in exactly this shape:
-{{
-  "product_fit_score": 0,
-  "fit_stage": "Partial Fit",
-  "confidence": 0.0,
-  "fit_summary": "Concise product-fit assessment.",
-  "matched_capabilities": [
-    {{
-      "buyer_need": "Buyer requirement or pain point",
-      "matched_capability": "Relevant capability or solution area",
-      "fit_strength": "Strong",
-      "evidence": "Short transcript-grounded evidence"
-    }}
-  ],
-  "product_gaps": [
-    {{
-      "gap_type": "Integration Gap",
-      "severity": "Medium",
-      "description": "Concise fit blocker or missing proof point.",
-      "recommendation": "Actionable sales or solution step."
-    }}
-  ],
-  "integration_fit": {{
-    "score": 0,
-    "summary": "Concise integration assessment.",
-    "required_integrations": ["Named system or integration area"],
-    "risks": ["Integration risk"]
-  }},
-  "competitive_positioning": {{
-    "competitors_mentioned": ["Competitor name"],
-    "differentiators": ["Evidence-grounded differentiator"],
-    "positioning_summary": "How to position the solution against alternatives."
-  }},
-  "risk_flags": [
-    "Important product-fit risk"
-  ],
-  "recommended_positioning": [
-    "Specific positioning message"
-  ],
-  "recommended_next_actions": [
-    "Specific next step"
-  ]
-}}
-
-Scoring guidance:
-- 0-20 Poor Fit
-- 21-45 Partial Fit
-- 46-65 Qualified Fit
-- 66-85 Strong Fit
-- 86-100 Strategic Fit
-
-TRANSCRIPT:
-{transcript_text}
-"""
+def _task(p: DomainProfile) -> str:
+    pf = p.product_fit
+    bands = ", ".join(f"{s.name} ≤{s.max_score}" for s in sorted(pf.fit_stages, key=lambda s: s.max_score))
+    if p.offerings:
+        basis = f"Judge fit against {p.organization.name}'s offering catalog:\n{p.catalog_text()}\n"
+    else:
+        basis = "No offering catalog is configured; judge fit against the solution discussed in the conversation.\n"
+    competitors = ", ".join(p.lexicons.competitors)
+    return (
+        "Assess product fit for the sales team.\n"
+        + basis
+        + "Evaluate buyer needs and use cases, requested capabilities, integration needs, security and "
+        "compliance expectations, delivery and support expectations, competitive context, and proof points needed.\n"
+        f"- product_fit_score: 0-100. Stage bands: {bands}. fit_stage must match the score.\n"
+        "- Never claim a capability, integration, certification, or customer that is not in the catalog or conversation.\n"
+        + (f"- Known competitors to watch for: {competitors}.\n" if competitors else "")
+        + "- integration_fit.score: 0-100. confidence: 0-1. Lists: max 6 short items.\n"
+        "Return JSON only."
+    )
 
 
-def _empty_output() -> dict[str, Any]:
+def empty_output(p: DomainProfile) -> dict[str, Any]:
+    stages = sorted(p.product_fit.fit_stages, key=lambda s: s.max_score)
     return {
         "product_fit_score": 0,
-        "fit_stage": "Poor Fit",
+        "fit_stage": stages[0].name if stages else "",
         "confidence": 0.0,
         "fit_summary": "",
         "matched_capabilities": [],
         "product_gaps": [],
-        "integration_fit": {
-            "score": 0,
-            "summary": "",
-            "required_integrations": [],
-            "risks": [],
-        },
-        "competitive_positioning": {
-            "competitors_mentioned": [],
-            "differentiators": [],
-            "positioning_summary": "",
-        },
+        "integration_fit": {"score": 0, "summary": "", "required_integrations": [], "risks": []},
+        "competitive_positioning": {"competitors_mentioned": [], "differentiators": [], "positioning_summary": ""},
         "risk_flags": [],
         "recommended_positioning": [],
         "recommended_next_actions": [],
@@ -155,277 +87,100 @@ def _empty_output() -> dict[str, Any]:
     }
 
 
-def _parse_json(raw: str) -> dict[str, Any] | None:
-    candidate = (raw or "").strip()
-    if candidate.startswith("```"):
-        candidate = re.sub(r"^```(?:json)?", "", candidate, flags=re.I).rstrip("`").strip()
-    start = candidate.find("{")
-    end = candidate.rfind("}")
-    if start >= 0 and end > start:
-        candidate = candidate[start : end + 1]
-    try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
-def _clean_text(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    return " ".join(str(value).split())
-
-
-def _as_list(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return value
-    if value in (None, ""):
-        return []
-    return [value]
-
-
-def _as_text_list(value: Any, limit: int = 8) -> list[str]:
-    return [_clean_text(item) for item in _as_list(value)[:limit] if _clean_text(item)]
-
-
-def _clamp_int(value: Any, minimum: int = 0, maximum: int = 100) -> int:
-    try:
-        number_float = float(value)
-    except (TypeError, ValueError):
-        return minimum
-    if maximum == 100 and 0 < number_float <= 1:
-        number_float *= 100
-    return max(minimum, min(maximum, int(round(number_float))))
-
-
-def _clamp_confidence(value: Any) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, round(number, 2)))
-
-
-def _stage_from_score(score: int) -> str:
-    if score <= 20:
-        return "Poor Fit"
-    if score <= 45:
-        return "Partial Fit"
-    if score <= 65:
-        return "Qualified Fit"
-    if score <= 85:
-        return "Strong Fit"
-    return "Strategic Fit"
-
-
-def _normalize_choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
-    text = _clean_text(value)
-    lowered = text.lower()
-    for option in allowed:
-        if lowered == option.lower():
-            return option
-    return default
-
-
-def _normalize_match(value: Any) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    buyer_need = _clean_text(value.get("buyer_need"))
-    capability = _clean_text(value.get("matched_capability"))
-    evidence = _clean_text(value.get("evidence"))
-    if not buyer_need and not capability and not evidence:
-        return None
-    return {
-        "buyer_need": buyer_need or "Need requires clarification",
-        "matched_capability": capability or "Potential capability fit to validate",
-        "fit_strength": _normalize_choice(value.get("fit_strength"), FIT_STRENGTHS, "Moderate"),
-        "evidence": evidence,
-    }
-
-
-def _normalize_gap(value: Any) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    description = _clean_text(value.get("description"))
-    recommendation = _clean_text(value.get("recommendation"))
-    if not description and not recommendation:
-        return None
-    return {
-        "gap_type": _normalize_choice(value.get("gap_type"), PRODUCT_GAP_TYPES, "Capability Gap"),
-        "severity": _normalize_choice(value.get("severity"), ("Low", "Medium", "High", "Critical"), "Medium"),
-        "description": description or "Potential product-fit risk requires validation.",
-        "recommendation": recommendation or "Validate this fit area with the buyer and solution team.",
-    }
-
-
-def _normalize_output(parsed: dict[str, Any] | None) -> dict[str, Any]:
-    output = _empty_output()
+def normalize_output(parsed: dict[str, Any] | None, p: DomainProfile) -> dict[str, Any]:
+    pf = p.product_fit
+    out = empty_output(p)
     if not parsed:
-        return output
-
-    score = _clamp_int(parsed.get("product_fit_score"))
-    output["product_fit_score"] = score
-    output["fit_stage"] = _stage_from_score(score)
-    output["confidence"] = _clamp_confidence(parsed.get("confidence"))
-    output["fit_summary"] = _clean_text(parsed.get("fit_summary"))
-    output["matched_capabilities"] = [
-        match for match in (_normalize_match(item) for item in _as_list(parsed.get("matched_capabilities"))[:10]) if match
-    ]
-    output["product_gaps"] = [
-        gap for gap in (_normalize_gap(item) for item in _as_list(parsed.get("product_gaps"))[:8]) if gap
-    ]
-
-    integration_raw = parsed.get("integration_fit") if isinstance(parsed.get("integration_fit"), dict) else {}
-    output["integration_fit"] = {
-        "score": _clamp_int(integration_raw.get("score")),
-        "summary": _clean_text(integration_raw.get("summary")),
-        "required_integrations": _as_text_list(integration_raw.get("required_integrations"), limit=10),
-        "risks": _as_text_list(integration_raw.get("risks"), limit=8),
-    }
-
-    competitive_raw = (
-        parsed.get("competitive_positioning")
-        if isinstance(parsed.get("competitive_positioning"), dict)
-        else {}
-    )
-    output["competitive_positioning"] = {
-        "competitors_mentioned": _as_text_list(competitive_raw.get("competitors_mentioned"), limit=8),
-        "differentiators": _as_text_list(competitive_raw.get("differentiators"), limit=8),
-        "positioning_summary": _clean_text(competitive_raw.get("positioning_summary")),
-    }
-    output["risk_flags"] = _as_text_list(parsed.get("risk_flags"), limit=8)
-    output["recommended_positioning"] = _as_text_list(parsed.get("recommended_positioning"), limit=8)
-    output["recommended_next_actions"] = _as_text_list(parsed.get("recommended_next_actions"), limit=8)
-    output["notes"] = output["fit_summary"]
-    return output
-
-
-def _heuristic_output(transcript: str) -> dict[str, Any]:
-    """Conservative fallback used only when the local LLM returns invalid JSON."""
-    output = _empty_output()
-    lowered = transcript.lower()
-    score = 0
-    matches: list[dict[str, str]] = []
-    gaps: list[dict[str, str]] = []
-
-    def add_match(need: str, capability: str, strength: str, evidence: str, points: int) -> None:
-        nonlocal score
-        score += points
+        return out
+    score = clamp_int(parsed.get("product_fit_score"))
+    out["product_fit_score"] = score
+    out["fit_stage"] = p.stage_for_score(pf.fit_stages, score)
+    out["confidence"] = clamp_float(parsed.get("confidence"))
+    out["fit_summary"] = clean_text(parsed.get("fit_summary"))
+    area_default = pf.capability_areas[0] if pf.capability_areas else ""
+    matches = []
+    for m in as_list(parsed.get("matched_capabilities"))[:10]:
+        if not isinstance(m, dict):
+            continue
+        need, cap = clean_text(m.get("buyer_need")), clean_text(m.get("matched_capability"))
+        if not need and not cap:
+            continue
         matches.append(
             {
-                "buyer_need": need,
-                "matched_capability": capability,
-                "fit_strength": strength,
-                "evidence": evidence,
+                "buyer_need": need or "Need requires clarification",
+                "matched_capability": cap or "Potential fit to validate",
+                "capability_area": normalize_choice(m.get("capability_area"), pf.capability_areas, area_default),
+                "fit_strength": normalize_choice(m.get("fit_strength"), STRENGTHS, "Moderate"),
+                "evidence": clean_text(m.get("evidence")),
             }
         )
-
-    if "migrate" in lowered or "cloud migration" in lowered:
-        add_match(
-            "Migrate legacy workloads to cloud",
-            "Cloud Migration",
-            "Strong",
-            "Transcript discusses migration of legacy workloads to AWS or Azure.",
-            18,
-        )
-    if "24x7" in lowered or "managed cloud operations" in lowered or "managed services" in lowered:
-        add_match(
-            "Post-migration operational support",
-            "Managed Services",
-            "Strong",
-            "Buyer requested 24x7 managed cloud operations.",
-            16,
-        )
-    if "monitoring" in lowered or "alerting" in lowered or "aiops" in lowered:
-        add_match(
-            "Integrate with existing monitoring and alerting stack",
-            "AIOps/Monitoring",
-            "Strong",
-            "Buyer references an existing monitoring stack and integration value.",
-            16,
-        )
-    if "hipaa" in lowered or "soc 2" in lowered or "compliance" in lowered:
-        add_match(
-            "Meet compliance requirements",
-            "Security/Compliance",
-            "Moderate",
-            "Buyer named HIPAA and SOC 2 Type II requirements.",
-            14,
-        )
-    if "near-zero downtime" in lowered or "zero unplanned downtime" in lowered:
-        add_match(
-            "Avoid business disruption during migration",
-            "Implementation Support",
-            "Moderate",
-            "Buyer emphasized near-zero downtime and availability of patient-facing systems.",
-            14,
-        )
-    if "existing customer" in lowered or "already embedded" in lowered:
-        score += 12
-
-    if any(term in lowered for term in ("clinical systems", "stateful", "cannot go down", "patient-facing")):
+    out["matched_capabilities"] = matches
+    gaps = []
+    for g in as_list(parsed.get("product_gaps"))[:8]:
+        if not isinstance(g, dict):
+            continue
+        desc, rec = clean_text(g.get("description")), clean_text(g.get("recommendation"))
+        if not desc and not rec:
+            continue
         gaps.append(
             {
-                "gap_type": "Performance/Scale Gap",
-                "severity": "High",
-                "description": "Buyer needs proof that stateful or patient-facing workloads can be migrated without disruption.",
-                "recommendation": "Provide a live-migration approach, healthcare workload reference architecture, and risk controls.",
+                "gap_type": normalize_choice(g.get("gap_type"), pf.gap_types, pf.gap_types[0] if pf.gap_types else "Gap"),
+                "severity": normalize_choice(g.get("severity"), SEVERITIES, "Medium"),
+                "description": desc or "Potential fit risk requires validation.",
+                "recommendation": rec or "Validate this area with the buyer and solution team.",
             }
         )
-    if "devops team is small" in lowered or "handle 90%" in lowered:
-        gaps.append(
-            {
-                "gap_type": "Services/Delivery Gap",
-                "severity": "Medium",
-                "description": "Buyer expects the vendor to own most migration execution due to limited internal capacity.",
-                "recommendation": "Position delivery capacity, governance model, and managed-services responsibilities clearly.",
-            }
-        )
-    if "accenture" in lowered or "deloitte" in lowered:
-        gaps.append(
-            {
-                "gap_type": "Competitive Differentiation Gap",
-                "severity": "Medium",
-                "description": "Buyer is comparing against large consulting competitors.",
-                "recommendation": "Differentiate on existing stack integration, faster onboarding, and lower transition risk.",
-            }
-        )
-
-    score = min(100, score)
-    output["product_fit_score"] = score
-    output["fit_stage"] = _stage_from_score(score)
-    output["confidence"] = 0.58 if score else 0.25
-    output["matched_capabilities"] = matches[:8]
-    output["product_gaps"] = gaps[:6]
-    output["integration_fit"] = {
-        "score": 82 if "monitoring" in lowered or "already embedded" in lowered else 45,
-        "summary": (
-            "Integration fit is strong because the vendor is already embedded in the monitoring stack."
-            if "monitoring" in lowered or "already embedded" in lowered
-            else "Integration fit requires further validation."
-        ),
-        "required_integrations": ["Existing monitoring and alerting stack"] if "monitoring" in lowered else [],
-        "risks": ["Clinical application continuity must be validated"] if "clinical systems" in lowered else [],
+    out["product_gaps"] = gaps
+    integ = parsed.get("integration_fit") if isinstance(parsed.get("integration_fit"), dict) else {}
+    out["integration_fit"] = {
+        "score": clamp_int(integ.get("score")),
+        "summary": clean_text(integ.get("summary")),
+        "required_integrations": as_text_list(integ.get("required_integrations"), 10),
+        "risks": as_text_list(integ.get("risks")),
     }
-    competitors = [name for name in ("Accenture", "Deloitte") if name.lower() in lowered]
-    output["competitive_positioning"] = {
-        "competitors_mentioned": competitors,
-        "differentiators": ["Existing monitoring-stack footprint"] if "already embedded" in lowered or "monitoring" in lowered else [],
-        "positioning_summary": "Position around proven integration, migration risk reduction, and managed execution capacity.",
+    comp = parsed.get("competitive_positioning") if isinstance(parsed.get("competitive_positioning"), dict) else {}
+    out["competitive_positioning"] = {
+        "competitors_mentioned": as_text_list(comp.get("competitors_mentioned")),
+        "differentiators": as_text_list(comp.get("differentiators")),
+        "positioning_summary": clean_text(comp.get("positioning_summary")),
     }
-    output["risk_flags"] = [gap["description"] for gap in gaps]
-    output["recommended_positioning"] = [
-        "Lead with continuity-safe migration for critical workloads.",
-        "Emphasize existing monitoring integration and lower transition risk.",
-        "Package managed cloud operations as a capacity extension for the buyer's small DevOps team.",
-    ]
-    output["recommended_next_actions"] = [gap["recommendation"] for gap in gaps[:3]]
-    output["fit_summary"] = (
-        f"{output['fit_stage']} based on {len(matches)} matched requirement areas and "
-        f"{len(gaps)} product-fit risks that need validation."
+    out["risk_flags"] = as_text_list(parsed.get("risk_flags"))
+    out["recommended_positioning"] = as_text_list(parsed.get("recommended_positioning"))
+    out["recommended_next_actions"] = as_text_list(parsed.get("recommended_next_actions"))
+    out["notes"] = out["fit_summary"]
+    return out
+
+
+def heuristic_output(transcript: str, p: DomainProfile) -> dict[str, Any]:
+    """Keyword overlap with the offering catalog; used only in degraded mode."""
+    out = empty_output(p)
+    words = set(_WORD.findall(transcript.lower()))
+    matches = []
+    for off in p.offerings:
+        vocab = {w for term in [*off.keywords, *off.capabilities] for w in _WORD.findall(term.lower()) if len(w) > 3}
+        hits = sorted(words & vocab)
+        if hits:
+            matches.append(
+                {
+                    "buyer_need": "Mentioned: " + ", ".join(hits[:5]),
+                    "matched_capability": off.name,
+                    "capability_area": p.product_fit.capability_areas[0] if p.product_fit.capability_areas else "",
+                    "fit_strength": "Strong" if len(hits) >= 3 else "Moderate",
+                    "evidence": "Keyword overlap with the offering catalog.",
+                }
+            )
+    score = min(100, 20 * len(matches))
+    competitors = [c for c in p.lexicons.competitors if c.lower() in transcript.lower()]
+    out.update(
+        product_fit_score=score,
+        fit_stage=p.stage_for_score(p.product_fit.fit_stages, score),
+        confidence=0.3,
+        matched_capabilities=matches,
+        fit_summary="Estimated from keyword overlap because the model was unavailable.",
     )
-    output["notes"] = output["fit_summary"]
-    return output
+    out["competitive_positioning"]["competitors_mentioned"] = competitors
+    out["notes"] = out["fit_summary"]
+    return out
 
 
 class ProductFitAgent(PlatformAgent):
@@ -435,47 +190,32 @@ class ProductFitAgent(PlatformAgent):
         self.llm = llm_service
 
     def run(self, payload: dict, context: AgentContext) -> AgentResult:
-        transcript = (payload.get("transcript_text") or "")[:60_000]
+        profile = load_profile(payload.get("profile"))
+        transcript = payload.get("transcript_text") or ""
         if not transcript.strip():
-            return AgentResult(self.name, _empty_output(), "No transcript provided.", 0.0)
-
-        prompt = EXTRACTION_PROMPT.format(
-            fit_stages=", ".join(FIT_STAGES),
-            gap_types=", ".join(PRODUCT_GAP_TYPES),
-            capability_areas=", ".join(CAPABILITY_AREAS),
-            transcript_text=transcript,
-        )
+            return AgentResult(self.name, empty_output(profile), "No transcript provided.", 0.0)
         try:
-            raw_response = self.llm.generate(
-                prompt=prompt,
-                system=SYSTEM_PROMPT,
-                temperature=0.0,
-                max_tokens=1600,
-            )
-        except LLMServiceError as exc:
-            return AgentResult(
-                self.name,
-                _empty_output(),
-                f"LLM unavailable ({exc}); could not analyze product fit.",
-                0.0,
-            )
-
-        output = _normalize_output(_parse_json(raw_response))
-        if (
-            not output.get("matched_capabilities")
-            and not output.get("product_gaps")
-            and not output.get("risk_flags")
-            and output.get("product_fit_score", 0) == 0
-        ):
-            output = _heuristic_output(transcript)
-        confidence = output.get("confidence", 0.0)
+            parsed = self.llm.complete_json(
+                agent=self.name,
+                messages=transcript_messages(transcript, _task(profile)),
+                schema=_schema(profile),
+                schema_name="product_fit",
+                purpose="analyze_product_fit",
+                max_tokens=5000,
+                expected_tokens=1500,
+            ).parsed
+            output = normalize_output(parsed, profile)
+            mode = "llm"
+        except LLMServiceError:
+            if not self.llm.degraded_allowed:
+                raise
+            output = heuristic_output(transcript, profile)
+            mode = "heuristic"
+        output["mode"] = mode
         return AgentResult(
             self.name,
             output,
-            (
-                f"Product fit generated with score {output['product_fit_score']} "
-                f"({output['fit_stage']}), {len(output['matched_capabilities'])} matches, "
-                f"and {len(output['product_gaps'])} fit gaps."
-            ),
-            confidence,
+            f"Fit {output['product_fit_score']} ({output['fit_stage']}), {len(output['matched_capabilities'])} matches, "
+            f"{len(output['product_gaps'])} gaps ({mode}).",
+            output.get("confidence", 0.0),
         )

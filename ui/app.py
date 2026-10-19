@@ -99,6 +99,13 @@ if not st.session_state.get("authenticated"):
 render_sidebar()
 render_header(title="Dashboard")
 
+from utils.profile import get_active_profile  # noqa: E402
+
+_PROFILE = get_active_profile()
+_LLM = _PROFILE.get("llm") or {}
+_FRONTIER = (_LLM.get("frontier_model") or "frontier model").split("/")[-1]
+_FAST = (_LLM.get("fast_model") or "fast model").split("/")[-1]
+
 # ── Executive Overview Hero ─────────────────────────────────────────────
 st.markdown(
     """
@@ -106,8 +113,8 @@ st.markdown(
         <div class="rfp-kicker">Executive Overview</div>
         <h1 class="rfp-title">Multi-Agent RFP Response Engine</h1>
         <p class="rfp-copy">
-            AI-powered proposal generation with autonomous agent orchestration.
-            Create new proposals, revise sections, detect intent from sales conversations,
+            Proposal generation for any industry with autonomous agent orchestration.
+            Create proposals, revise sections, score existing responses, analyze sales conversations,
             research vendors, and search your knowledge base.
         </p>
     </div>
@@ -121,6 +128,7 @@ sections_generated = sum(len(item.get("sections", [])) for item in results)
 latest = st.session_state.get("latest_result", {})
 latest_score = latest.get("scores", {}).get("composite_score")
 
+usage = st.session_state.get("session_usage", {})
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     render_stat_card("Total Workflows", str(len(results)), icon="account_tree")
@@ -130,19 +138,24 @@ with c3:
     score_str = f"{latest_score:.2f}" if latest_score is not None else "--"
     render_stat_card("Latest Score", score_str, icon="speed")
 with c4:
-    render_stat_card("Knowledge Base", "Active", sub="pgvector + RAG", icon="database")
+    render_stat_card(
+        "Session Tokens",
+        f"{int(usage.get('total_tokens', 0)):,}",
+        sub=f"${float(usage.get('cost_usd', 0)):.4f} · {int(usage.get('saved_tokens', 0)):,} saved by cache",
+        icon="data_usage",
+    )
 
 st.write("")
 
 # ── Agent Collaboration Panel ───────────────────────────────────────────
-render_section_header("Agent Collaboration Panel", icon="smart_toy", badge="7 agents")
+render_section_header("Agent Collaboration Panel", icon="smart_toy", badge="12 agents")
 
 a1, a2, a3, a4 = st.columns(4)
 agents = [
-    ("Request Structuring", "Parses RFP text into structured requirements, vendors, and solution types", "psychology", "blue"),
-    ("Knowledge Retrieval", "Searches pgvector index for relevant historical proposal chunks", "search", "teal"),
-    ("Section Generation", "Drafts proposal sections using Qwen 2.5 7B with RAG context", "edit_note", "blue"),
-    ("Validation & Scoring", "Checks requirement coverage and computes composite quality scores", "verified_user", "teal"),
+    ("Request Structuring", f"Extracts requirements, criteria, and constraints from any RFP ({_FRONTIER})", "psychology", "blue"),
+    ("Knowledge Retrieval", "Searches past proposals in pgvector, relaxing filters when precedent is thin", "search", "teal"),
+    ("Section Generation", f"Drafts sections in parallel with {_FRONTIER}; unchanged sections come from cache", "edit_note", "blue"),
+    ("Validation & Scoring", "Semantic requirement coverage plus a rubric against the evaluation criteria", "verified_user", "teal"),
 ]
 for col, (name, desc, icon, color) in zip([a1, a2, a3, a4], agents):
     with col:
@@ -188,10 +201,11 @@ st.markdown(
         <div style="display:flex;gap:1rem;margin-top:0.75rem;flex-wrap:wrap">
             <span class="status-chip active">Budget: 12 tool calls</span>
             <span class="status-chip processing">Max replans: 2</span>
-            <span class="status-chip queued">LLM: Qwen 2.5 7B</span>
+            <span class="status-chip queued">Supervisor: %(fast)s</span>
+            <span class="status-chip queued">Writer: %(frontier)s</span>
         </div>
     </div>
-    """,
+    """ % {"fast": _FAST, "frontier": _FRONTIER},
     unsafe_allow_html=True,
 )
 
@@ -214,7 +228,7 @@ with left_col:
             status = r.get("status", "completed")
             n_sections = len(r.get("sections", []))
             score = r.get("scores", {}).get("composite_score")
-            score_str = f"{score:.2f}" if score else "--"
+            score_str = f"{score:.2f}" if score is not None else "--"
             title = r.get("_pdf_title", f"Workflow {wf_id}")
             chip_cls = "active" if status == "completed" else "processing"
             st.markdown(
@@ -242,3 +256,4 @@ with right_col:
     st.page_link("pages/5_market_research.py", label="Market Research", use_container_width=True)
     st.page_link("pages/6_ingestion.py", label="Document Ingestion", use_container_width=True)
     st.page_link("pages/7_search.py", label="Retrieval Explorer", use_container_width=True)
+    st.page_link("pages/8_usage.py", label="Token Usage", use_container_width=True)

@@ -186,14 +186,17 @@ def build_proposal_pdf(
         ),
     ]
 
+    request_brief = workflow_result.get("request") or {}
     client_rows = [
-        ["Client Company", _clean(metadata.get("client_name") or metadata.get("selected_company"))],
-        ["Contact Name", _clean(metadata.get("contact_name"))],
-        ["Phone Number", _clean(metadata.get("phone_number"))],
-        ["Solution", _clean(metadata.get("solution_label"))],
-        ["Priorities", _clean(", ".join(metadata.get("priorities", [])))],
+        ["Client", _clean(metadata.get("client_name") or request_brief.get("client_name"))],
+        ["Industry", _clean(request_brief.get("industry"))],
+        ["Contact", _clean(", ".join(v for v in (metadata.get("contact_name"), metadata.get("contact_email"),
+                                                 metadata.get("phone_number")) if v))],
+        ["Solution", _clean((request_brief.get("solution_type") or "").replace("_", " ").title())],
+        ["Timeline", _clean(request_brief.get("timeline"))],
     ]
-    table = Table(client_rows, colWidths=[4.2 * cm, 11.6 * cm])
+    client_rows = [row for row in client_rows if row[1]]
+    table = Table(client_rows or [["Client", "-"]], colWidths=[4.2 * cm, 11.6 * cm])
     table.setStyle(
         TableStyle(
             [
@@ -214,11 +217,15 @@ def build_proposal_pdf(
     scores = workflow_result.get("scores") or {}
     if scores:
         story.append(Paragraph("Proposal Score", styles["h2"]))
+        def _fmt(value: Any) -> str:
+            return "not measured" if value is None else f"{float(value):.2f}"
+
         score_rows = [
-            ["Composite", f"{scores.get('composite_score', 0):.2f}"],
-            ["Requirement Coverage", f"{scores.get('requirement_coverage_score', 0):.2f}"],
-            ["Solution Fit", f"{scores.get('solution_fit_score', 0):.2f}"],
-            ["Historical Similarity", f"{scores.get('historical_similarity_score', 0):.2f}"],
+            ["Composite", _fmt(scores.get("composite_score"))],
+            ["Requirement Coverage", _fmt(scores.get("requirement_coverage_score"))],
+            ["Rubric Quality", _fmt(scores.get("quality_score"))],
+            ["Solution Fit", _fmt(scores.get("solution_fit_score"))],
+            ["Precedent Similarity", _fmt(scores.get("historical_similarity_score"))],
         ]
         score_table = Table(score_rows, colWidths=[7.8 * cm, 8 * cm])
         score_table.setStyle(
@@ -252,7 +259,9 @@ def build_proposal_pdf(
     story.append(Spacer(1, 8))
 
     for section in workflow_result.get("sections", []):
-        section_title = str(section.get("section_key", "Proposal Section")).replace("_", " ").title()
+        if section.get("error") or not section.get("draft_text"):
+            continue
+        section_title = section.get("title") or str(section.get("section_key", "Proposal Section")).replace("_", " ").title()
         story.append(Paragraph(_clean(section_title), styles["h2"]))
         _append_markdown_text(story, section.get("draft_text", ""), styles)
         citations = section.get("citations") or []

@@ -55,10 +55,13 @@ with c2:
     if not sections:
         st.warning("This workflow has no generated sections.")
         st.stop()
-    section_keys = [s.get("section_key", f"section_{i}") for i, s in enumerate(sections)]
+    section_keys = [s.get("section_key", f"section_{i}") for i, s in enumerate(sections) if not s.get("error")]
+    if not section_keys:
+        st.warning("Every section in this workflow failed to generate; there is nothing to revise.")
+        st.stop()
     selected_key = st.selectbox("Section", options=section_keys)
 
-selected_section = sections[section_keys.index(selected_key)]
+selected_section = next(s for s in sections if s.get("section_key") == selected_key)
 
 # ── Current Draft ───────────────────────────────────────────────────────
 render_section_header("Current Draft", icon="article", badge=selected_key)
@@ -71,7 +74,7 @@ render_section_header("Revision Instructions", icon="auto_fix_high")
 with st.form("revision_form"):
     instruction = st.text_area(
         "What should the agent change?",
-        placeholder="e.g. Add more detail about implementation timeline and reduce jargon. Include ISO 27001 certification mention.",
+        placeholder="e.g. Add more detail on the timeline, reduce jargon, and mention our security certifications.",
         height=100,
     )
     submitted = st.form_submit_button("Revise Section", type="primary", use_container_width=True)
@@ -81,9 +84,11 @@ if submitted:
         st.error("Please provide a revision instruction.")
         st.stop()
 
-    from utils.api_client import revise_section
+    from utils.api_client import APIError, revise_section
+    from utils.profile import active_profile_name
 
-    section_id = selected_section.get("section_id", selected_wf_id)
+    section_id = selected_section.get("section_id") or selected_wf_id
+    requirements = (selected_wf.get("request") or {}).get("requirements") or []
 
     with st.spinner("Running revision pipeline — retrieving evidence and refining draft..."):
         try:
@@ -92,14 +97,22 @@ if submitted:
                 instruction=instruction,
                 section_key=selected_key,
                 base_text=selected_section.get("draft_text", ""),
+                requirements=requirements,
+                profile=selected_wf.get("profile") or active_profile_name(),
             )
-        except Exception as exc:
+        except APIError as exc:
+            st.error(f"Revision failed: {exc}")
+            st.stop()
+        except Exception as exc:  # noqa: BLE001
             st.error(f"Revision failed: {exc}")
             st.stop()
 
-    st.success("Revision complete!")
-
     revised_section = revision_result.get("revision", {})
+    number = revised_section.get("revision_number")
+    st.success(f"Revision {number} saved." if number else "Revision complete (not persisted: section is not in the database).")
+    from utils.token_usage import accumulate_session_usage, render_token_usage
+
+    accumulate_session_usage(revision_result.get("token_usage"))
     revised_text = revised_section.get("draft_text", "_No revised text._")
 
     # ── Side-by-side comparison ─────────────────────────────────────────
@@ -132,7 +145,6 @@ if submitted:
             break
 
     revision_steps = [
-        revision_result.get("plan", {}).get("workflow_type") and "Planned revision workflow.",
         revision_result.get("retrieval", {}).get("results") is not None
         and f"Retrieved {len(revision_result.get('retrieval', {}).get('results', []))} evidence chunks.",
         revised_section.get("revision_summary"),
@@ -160,6 +172,8 @@ if submitted:
         selected_wf.update(revised_workflow)
         st.session_state["latest_result"] = selected_wf
         st.success("Session copy updated with the revised section.")
+
+    render_token_usage(revision_result.get("token_usage"), title="Revision Token Usage")
 
     # ── Agent Trace ─────────────────────────────────────────────────────
     from utils.agent_trace import render_agent_trace

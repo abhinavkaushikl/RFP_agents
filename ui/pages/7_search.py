@@ -30,11 +30,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+from utils.profile import active_profile_name, get_active_profile  # noqa: E402
+
+_PROFILE = get_active_profile()
+_SECTIONS = {s["key"]: s["title"] for s in _PROFILE.get("sections", [])}
+
 # ── Search form ─────────────────────────────────────────────────────────
 with st.form("search_form"):
     query = st.text_input(
         "Search Query",
-        placeholder="e.g. event correlation and noise reduction for telecom",
+        placeholder="e.g. phased rollout with data migration and user training",
     )
 
     render_section_header("Filters", icon="filter_list")
@@ -42,18 +47,14 @@ with st.form("search_form"):
     with col1:
         section_type = st.selectbox(
             "Section Type",
-            options=["", "executive_summary", "solution_overview", "implementation_plan", "pricing_notes"],
+            options=["", *_SECTIONS],
+            format_func=lambda k: _SECTIONS.get(k, "Any section"),
         )
     with col2:
-        solution_type = st.selectbox(
-            "Solution Type",
-            options=["", "aiops_operations", "aiops_observability", "aiops_general"],
-        )
+        solution_type = st.text_input("Solution Type", placeholder="any (e.g. general)")
     with col3:
-        industry = st.selectbox(
-            "Industry",
-            options=["", "Telecom", "Healthcare", "Financial Services", "Retail", "Manufacturing"],
-        )
+        industry = st.selectbox("Industry", options=["", *_PROFILE.get("industries", [])],
+                                format_func=lambda i: i or "Any industry")
     with col4:
         top_k = st.number_input("Results", min_value=1, max_value=20, value=5)
 
@@ -72,9 +73,10 @@ if submitted:
             result = retrieval_search(
                 query=query,
                 section_type=section_type or None,
-                solution_type=solution_type or None,
+                solution_type=solution_type.strip() or None,
                 industry=industry or None,
                 top_k=top_k,
+                profile=active_profile_name(),
             )
         except Exception as exc:
             st.error(f"Search failed: {exc}")

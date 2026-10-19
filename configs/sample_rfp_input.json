@@ -1,14 +1,13 @@
 {
-  "title": "AIOps Modernization for Vodafone India",
-  "client": "Vodafone India",
-  "industry": "Telecommunications",
-  "solution_type": "aiops_general",
-  "request_text": "Vodafone India operates a heterogeneous network spanning Nokia core infrastructure, Huawei radio access, and Ericsson transport layers, leading to fragmented observability and a current MTTR of 90 minutes.\n\nRequirements:\n- Current MTTR: 90 minutes; Target MTTR: 25 minutes\n- Reduce daily alert volume by 60% through event correlation and noise suppression\n- Achieve 99.95% network availability with proactive incident detection\n- Integration with existing Nokia, Huawei, and Ericsson OSS systems\n- SLA: 99.99% uptime guarantee, critical incident response within 15 minutes\n- Implementation timeline: 6 months\n- Estimated annual savings: $3M; ROI period: 14 months\n\nEvaluation Criteria: Business impact and ROI clarity; technical fit for telecom operations; delivery feasibility; commercial flexibility; differentiation against incumbent vendors.",
+  "title": "Warehouse Management System Implementation",
+  "client": "Northwind Foods",
+  "profile": "default",
+  "request_text": "Northwind Foods operates three regional distribution centers and is replacing a 15-year-old on-premise warehouse system that cannot support same-day fulfilment.\n\nScope and requirements:\n- Deliver a cloud-hosted warehouse management system (WMS) for all three sites\n- Integrate bidirectionally with our SAP S/4HANA ERP for orders, inventory, and invoicing\n- Support barcode and RFID scanning on rugged handheld devices\n- Provide real-time inventory visibility by site, zone, and bin\n- Migrate 18 months of historical inventory and order data\n- Train 200 warehouse staff and 15 supervisors; provide train-the-trainer material\n- Provide 24x7 production support with a 1-hour response for severity-1 incidents\n- Comply with SOC 2 Type II and our data-retention policy\n\nTimeline: first site live within 6 months of contract signature, all sites within 10 months.\nBudget: up to USD 2.4M over three years including licences and services.\n\nEvaluation criteria: functional fit (30%), implementation approach and timeline (25%), total cost of ownership (20%), relevant experience and references (15%), support model (10%).",
   "sections": [
     "executive_summary",
-    "deal_storytelling",
-    "competitor_positioning",
+    "solution_overview",
     "implementation_plan",
+    "risk_management",
     "pricing_notes"
   ]
 }

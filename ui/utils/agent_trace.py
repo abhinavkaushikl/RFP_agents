@@ -63,8 +63,8 @@ def _entry_title(entry: dict) -> str:
         return f'<span class="tt-monospace">{html.escape(tool)}</span> <span class="status-chip error">ERROR</span>'
     if typ == "pick_intent":
         intent = entry.get("intent", "")
-        hint = entry.get("hint")
-        suffix = f' <span style="color:var(--text-dim);font-size:0.75rem">(hint: {html.escape(str(hint))})</span>' if hint else ""
+        how = entry.get("how")
+        suffix = f' <span style="color:var(--text-dim);font-size:0.75rem">(from {html.escape(str(how))})</span>' if how else ""
         return f'Intent detected: <span class="tt-monospace">{html.escape(intent)}</span>{suffix}'
     if typ == "make_plan":
         plan = entry.get("plan") or []
@@ -95,6 +95,12 @@ def _entry_subtitle(entry: dict) -> str:
             bits.append(html.escape(str(summary)))
         if entry.get("ok") is False and entry.get("error"):
             bits.append(f'Error: {html.escape(str(entry["error"]))[:240]}')
+        usage = entry.get("usage") or {}
+        if usage.get("total_tokens") or usage.get("cache_hits"):
+            tokens = f'{int(usage.get("total_tokens", 0)):,} tokens · ${float(usage.get("cost_usd", 0)):.4f}'
+            if usage.get("cache_hits"):
+                tokens += f' · {usage["cache_hits"]} cached ({int(usage.get("saved_tokens", 0)):,} saved)'
+            bits.append(tokens)
         return " · ".join(bits)
     if typ == "tool_error":
         return html.escape(str(entry.get("error", "")))[:240]

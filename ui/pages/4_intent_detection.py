@@ -7,7 +7,9 @@ from datetime import date
 
 import streamlit as st
 
-from utils.api_client import run_intent_detection
+from utils.api_client import APIError, extract_text, run_intent_detection
+from utils.profile import active_profile_name, get_active_profile, stage_for_score
+from utils.token_usage import accumulate_session_usage, render_token_usage
 from utils.theme import (
     apply_theme,
     render_header,
@@ -27,28 +29,18 @@ FRAME_KEYS = (
     "stakeholder_impact",
     "urgency_statement",
 )
-READINESS_STAGES = (
-    "Cold",
-    "Exploring",
-    "Interested",
-    "Evaluation Stage",
-    "High Intent",
-    "Ready to Buy",
-)
-FIT_STAGES = (
-    "Poor Fit",
-    "Partial Fit",
-    "Qualified Fit",
-    "Strong Fit",
-    "Strategic Fit",
-)
+_PROFILE = get_active_profile()
+_READINESS = _PROFILE.get("buyer_intelligence", {}).get("readiness_stages") or []
+_FIT = _PROFILE.get("product_fit", {}).get("fit_stages") or []
+READINESS_STAGES = tuple(s["name"] for s in _READINESS) or ("Cold",)
+FIT_STAGES = tuple(s["name"] for s in _FIT) or ("Poor Fit",)
 
 
 def _default_buyer_readiness() -> dict:
     return {
         "readiness_rating": 0,
         "buyer_readiness_score": 0,
-        "readiness_stage": "Cold",
+        "readiness_stage": READINESS_STAGES[0],
         "confidence": 0.0,
         "reasoning": [],
         "buying_gaps": "",
@@ -75,7 +67,7 @@ def _default_product_fit() -> dict:
     return {
         "notes": "",
         "product_fit_score": 0,
-        "fit_stage": "Poor Fit",
+        "fit_stage": FIT_STAGES[0],
         "confidence": 0.0,
         "fit_summary": "",
         "matched_capabilities": [],
@@ -166,29 +158,11 @@ def _as_list(value) -> list:
 
 
 def _score_to_stage(score: int) -> str:
-    if score <= 15:
-        return "Cold"
-    if score <= 35:
-        return "Exploring"
-    if score <= 55:
-        return "Interested"
-    if score <= 70:
-        return "Evaluation Stage"
-    if score <= 88:
-        return "High Intent"
-    return "Ready to Buy"
+    return stage_for_score(_READINESS, score) or READINESS_STAGES[0]
 
 
 def _fit_stage_from_score(score: int) -> str:
-    if score <= 20:
-        return "Poor Fit"
-    if score <= 45:
-        return "Partial Fit"
-    if score <= 65:
-        return "Qualified Fit"
-    if score <= 85:
-        return "Strong Fit"
-    return "Strategic Fit"
+    return stage_for_score(_FIT, score) or FIT_STAGES[0]
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -266,8 +240,8 @@ with input_col:
 
     with upload_col:
         uploaded = st.file_uploader(
-            "Transcript or email thread (.txt, .md, .eml)",
-            type=["txt", "md", "eml", "log"],
+            "Transcript, email thread, or opportunity document",
+            type=["txt", "md", "eml", "log", "pdf", "docx"],
             accept_multiple_files=False,
             help="Plain text works best. Email .eml files are read as raw text.",
         )
@@ -283,8 +257,11 @@ with input_col:
 
 if uploaded is not None:
     try:
-        raw_bytes = uploaded.read()
-        raw_text = raw_bytes.decode("utf-8", errors="replace")
+        raw_bytes = uploaded.getvalue()
+        if uploaded.name.lower().endswith((".pdf", ".docx")):
+            raw_text = extract_text(uploaded.name, raw_bytes, profile=active_profile_name())["text"]
+        else:
+            raw_text = raw_bytes.decode("utf-8", errors="replace")
     except Exception as exc:
         st.error(f"Could not read file: {exc}")
         raw_text = ""
@@ -300,7 +277,11 @@ if run_clicked and state["raw_text"]:
             result = run_intent_detection(
                 transcript_text=state["raw_text"],
                 file_name=state["file_name"],
+                profile=active_profile_name(),
             )
+        except APIError as exc:
+            st.error(f"Intent detection failed: {exc}")
+            result = None
         except Exception as exc:
             st.error(f"Intent detection failed: {exc}")
             result = None
@@ -319,6 +300,8 @@ if run_clicked and state["raw_text"]:
             if value:
                 state["product_fit"][key] = value
         st.success(result.get("summary", "Intent detection completed."))
+        accumulate_session_usage(result.get("token_usage"))
+        render_token_usage(result.get("token_usage"), title="Intent Detection Token Usage")
 
         from utils.agent_trace import render_agent_trace
         render_agent_trace(result.get("agent_trace"), title="Intent Detection Timeline")
@@ -369,11 +352,11 @@ with tab_client:
     with c1:
         co["opportunity_name"] = st.text_input(
             "Opportunity Name", value=co.get("opportunity_name", ""),
-            placeholder="e.g., Vodafone AIOps Modernization",
+            placeholder="e.g., Patient Portal Modernization",
         )
         co["client_name"] = st.text_input(
             "Client Name", value=co.get("client_name", ""),
-            placeholder="e.g., Vodafone India",
+            placeholder="e.g., Contoso Health Network",
         )
     with c2:
         relationship_options = ["Unknown", "New logo", "Existing customer", "Lapsed customer"]

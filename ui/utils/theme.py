@@ -1267,6 +1267,9 @@ def render_sidebar() -> None:
             st.session_state["authenticated"] = False
             st.rerun()
         st.divider()
+        from utils.profile import render_profile_picker
+
+        render_profile_picker()
         api_ok = True
         msg = "Backend online"
         try:
@@ -1304,7 +1307,18 @@ def render_stat_card(label: str, value: str, sub: str = "", icon: str = "") -> N
     )
 
 
-def render_score_gauge(value: float, label: str) -> None:
+def render_score_gauge(value: float | None, label: str) -> None:
+    if value is None:
+        st.markdown(
+            f'<div class="score-gauge">'
+            f'<div class="score-gauge-value">n/a</div>'
+            f'<div class="score-gauge-label">{label}</div>'
+            f'<div class="score-gauge-bar"></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    value = float(value)
     tone = "good" if value >= 0.8 else "warn" if value >= 0.6 else "bad"
     pct = min(value * 100, 100)
     st.markdown(

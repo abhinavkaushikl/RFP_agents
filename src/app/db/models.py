@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,8 +19,12 @@ def uuid_pk() -> Mapped[uuid.UUID]:
     return mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def now_column() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    return mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class WorkflowStatus(str, enum.Enum):
@@ -41,6 +45,11 @@ class ActorType(str, enum.Enum):
     user = "user"
     agent = "agent"
     import_job = "import"
+
+
+# Postgres stores enum *values* ('import'), not member names ('import_job').
+def _actor_enum() -> Enum:
+    return Enum(ActorType, name="actortype", values_callable=lambda e: [m.value for m in e])
 
 
 class AgentType(str, enum.Enum):
@@ -101,7 +110,7 @@ class RequestDocumentRevision(Base):
     structured_summary: Mapped[dict] = mapped_column(JSON, default=dict)
     requirements_json: Mapped[list] = mapped_column(JSON, default=list)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_by_type: Mapped[ActorType] = mapped_column(Enum(ActorType))
+    created_by_type: Mapped[ActorType] = mapped_column(_actor_enum())
     created_by_id: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = now_column()
 
@@ -138,7 +147,7 @@ class ProposalDocumentRevision(Base):
     raw_text: Mapped[str | None] = mapped_column(Text)
     normalized_text: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_by_type: Mapped[ActorType] = mapped_column(Enum(ActorType))
+    created_by_type: Mapped[ActorType] = mapped_column(_actor_enum())
     created_by_id: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = now_column()
 
@@ -172,7 +181,7 @@ class ProposalSectionRevision(Base):
     content_text: Mapped[str] = mapped_column(Text)
     content_json: Mapped[dict] = mapped_column(JSON, default=dict)
     change_summary: Mapped[str | None] = mapped_column(String(255))
-    created_by_type: Mapped[ActorType] = mapped_column(Enum(ActorType))
+    created_by_type: Mapped[ActorType] = mapped_column(_actor_enum())
     created_by_id: Mapped[str | None] = mapped_column(String(255))
     generation_context_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = now_column()
@@ -209,6 +218,10 @@ class WorkflowRun(Base):
     request_document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("request_documents.id"))
     proposal_document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("proposal_documents.id"))
     latest_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    profile: Mapped[str | None] = mapped_column(String(64))
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = now_column()
 
     steps: Mapped[list["WorkflowStep"]] = relationship(back_populates="workflow_run")
@@ -354,3 +367,33 @@ class DocumentMatchRunRevision(Base):
     created_at: Mapped[datetime] = now_column()
 
     document_match_run: Mapped["DocumentMatchRun"] = relationship(back_populates="revisions")
+
+
+class LLMUsageEvent(Base):
+    """One model call (or cache hit) made during a workflow, for token and cost reporting."""
+
+    __tablename__ = "llm_usage_events"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    workflow_type: Mapped[str | None] = mapped_column(String(100), index=True)
+    agent: Mapped[str] = mapped_column(String(100), index=True)
+    tool: Mapped[str | None] = mapped_column(String(100))
+    section_key: Mapped[str | None] = mapped_column(String(100))
+    purpose: Mapped[str | None] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(50), default="groq")
+    model: Mapped[str] = mapped_column(String(255), index=True)
+    tier: Mapped[str | None] = mapped_column(String(20))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    saved_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    saved_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="ok")
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)

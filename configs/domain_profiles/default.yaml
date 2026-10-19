@@ -1,0 +1,286 @@
+# Default domain profile — industry-agnostic.
+#
+# Copy this file (or create a new one with `extends: default`) to describe your
+# own organization, offering catalog, proposal sections, and sales categories.
+# Select a profile per request with `"profile": "<file name>"`, or set
+# RFP_DEFAULT_PROFILE for the whole deployment.
+
+display_name: Generic (any industry)
+description: Neutral defaults that work for any RFP. Add your offerings in a profile that extends this one.
+
+organization:
+  name: our organization
+  description: ""
+  differentiators: []
+
+writing:
+  tone: professional, specific, and evidence-based
+  locale: en-US
+  currency: USD
+  style_rules:
+    - Prefer concrete commitments, measurable outcomes, and named deliverables over adjectives.
+    - Mirror the buyer's terminology for their systems, teams, and goals.
+
+industries:
+  - name: Technology & Software
+    aliases: [technology, software, tech, it, saas]
+  - name: Telecommunications
+    aliases: [telecom, telco, communications]
+  - name: Financial Services
+    aliases: [banking, bank, insurance, fintech, capital markets]
+  - name: Healthcare
+    aliases: [healthcare & life sciences, life sciences, pharma, pharmaceuticals, medical, hospital]
+  - name: Government & Public Sector
+    aliases: [government, public sector, federal, state government, local government, defense]
+  - name: Manufacturing
+    aliases: [industrial, automotive, aerospace]
+  - name: Retail & Consumer Goods
+    aliases: [retail, ecommerce, e-commerce, consumer goods, cpg]
+  - name: Energy & Utilities
+    aliases: [energy, utilities, oil and gas, oil & gas, renewables]
+  - name: Education
+    aliases: [higher education, k-12, university, schools]
+  - name: Transportation & Logistics
+    aliases: [logistics, transportation, supply chain, shipping]
+  - name: Media & Entertainment
+    aliases: [media, entertainment, publishing, gaming]
+  - name: Professional Services
+    aliases: [consulting, legal, accounting]
+  - name: Real Estate & Construction
+    aliases: [real estate, construction, property]
+  - name: Hospitality & Travel
+    aliases: [hospitality, travel, hotels, airlines]
+  - name: Non-profit
+    aliases: [nonprofit, ngo, charity]
+  - name: Other
+    aliases: []
+
+# Your offering catalog. Leave empty and the agents infer the capabilities the
+# RFP asks for instead of matching against a catalog.
+offerings: []
+
+sections:
+  - key: executive_summary
+    title: Executive Summary
+    words: [180, 260]
+    guidance: >-
+      Lead with the buyer's objective in their own words, then the proposed approach and the
+      outcomes it delivers. Quantify outcomes only with figures that appear in the RFP or precedent.
+    headings: [Understanding of Your Objectives, Proposed Approach, Expected Outcomes, Why Us]
+    aliases: [summary, overview, executive_overview, tone_specific_summary]
+  - key: understanding_of_requirements
+    title: Understanding of Requirements
+    words: [200, 300]
+    guidance: >-
+      Restate the scope, constraints, and success criteria to show the buyer's needs were understood.
+      Group requirements by theme and call out any ambiguities as clarifying questions.
+    headings: [Scope, Key Requirements, Constraints and Assumptions, Clarifying Questions]
+    aliases: [requirements_understanding, our_understanding, scope]
+  - key: solution_overview
+    title: Solution Overview
+    words: [220, 320]
+    guidance: >-
+      Describe what will be delivered and how it meets the requirements. Map major requirements to
+      solution components.
+    headings: [Capabilities, How It Works, Fit with Your Environment, Outcomes]
+    aliases: [solution, proposed_solution, solution_summary]
+  - key: technical_approach
+    title: Technical Approach and Methodology
+    words: [250, 350]
+    guidance: >-
+      Explain the methods, standards, and tools used to deliver the work, including quality assurance
+      and how integration with the buyer's existing systems is handled.
+    headings: [Methodology, Components and Integration, Security and Compliance, Quality Assurance]
+    aliases: [approach, methodology, technical_solution]
+  - key: solution_architecture
+    title: Solution Architecture
+    words: [220, 320]
+    guidance: >-
+      Describe the architecture in text: main components, data and integration flows, security
+      controls, and how it scales and recovers from failure.
+    headings: [Components, Data and Integration Flows, Security Controls, Scalability and Resilience]
+    aliases: [architecture, architecture_diagram, architecture_diagram_text]
+  - key: implementation_plan
+    title: Implementation Plan
+    words: [260, 380]
+    guidance: >-
+      Lay out phases with milestones and deliverables. Derive durations from the timeline in the RFP;
+      if none is given, propose a realistic plan and label the durations as estimates.
+    headings: [Phases and Milestones, Team and Roles, Governance and Reporting, Acceptance Criteria]
+    aliases: [delivery, delivery_plan, timeline, work_plan, project_plan, transition_plan]
+  - key: project_governance
+    title: Project Governance and Communication
+    words: [180, 260]
+    guidance: Describe the governance structure, meeting cadence, escalation path, and reporting.
+    headings: [Governance Structure, Cadence and Reporting, Escalation, Change Control]
+    aliases: [governance, project_management]
+  - key: team_and_experience
+    title: Team and Qualifications
+    words: [180, 260]
+    guidance: >-
+      Describe the roles proposed and the experience they bring. Do not invent names or certifications
+      that are not in the context.
+    headings: [Proposed Team, Key Roles, Relevant Qualifications]
+    aliases: [team, staffing, personnel, key_personnel]
+  - key: case_studies
+    title: Relevant Experience
+    words: [200, 300]
+    guidance: >-
+      Summarize comparable past engagements using only the precedent provided. Never invent client
+      names or results; if precedent is thin, describe the type of experience instead.
+    headings: [Comparable Engagements, Results Achieved, Lessons Applied]
+    aliases: [references, past_performance, experience, customer_references]
+  - key: risk_management
+    title: Risk Management
+    words: [200, 280]
+    guidance: List the main delivery risks with impact and mitigation, and how risks are tracked.
+    headings: [Key Risks and Mitigations, Monitoring and Escalation]
+    aliases: [risks, risk_mitigation]
+  - key: compliance_response
+    title: Compliance and Security
+    words: [180, 280]
+    guidance: >-
+      Address every regulatory, security, and certification requirement in the RFP. State only
+      certifications present in the context; otherwise describe the controls that will be applied.
+    headings: [Regulatory Requirements, Security Controls, Data Protection, Certifications]
+    aliases: [compliance, security, information_security, data_protection]
+  - key: competitor_positioning
+    title: Why Choose Us
+    words: [200, 280]
+    guidance: >-
+      Explain what differentiates this proposal from likely alternatives, backed by evidence from the
+      context. Never disparage competitors by name.
+    headings: [Differentiators, Comparison to Alternatives, Proof Points]
+    aliases: [competitive_positioning, differentiation, why_us, value_proposition]
+  - key: pricing_notes
+    title: Commercial Proposal
+    words: [200, 300]
+    guidance: >-
+      Describe the pricing model, cost components, payment milestones, and commercial assumptions.
+      Never invent prices: if pricing data is not in the context, describe the model and list the
+      inputs needed to finalize it.
+    headings: [Pricing Approach, Cost Components, Payment Milestones, Commercial Assumptions]
+    aliases: [pricing, commercials, commercial_proposal, cost_proposal, fees]
+  - key: financials
+    title: Business Case and ROI
+    words: [180, 260]
+    guidance: >-
+      Present the expected value: investment, benefits, payback, and qualitative benefits. Use only
+      figures from the context and label estimates clearly.
+    headings: [Investment, Expected Benefits, Payback, Qualitative Benefits]
+    aliases: [business_case, roi, roi_summary, value_case]
+  - key: contract_annexure
+    title: Service Levels and Contract Terms
+    words: [200, 280]
+    guidance: Describe proposed service levels, reporting, remedies, and standard contractual safeguards.
+    headings: [Service Levels, Reporting, Remedies, Standard Terms]
+    aliases: [sla, service_levels, contract_terms, terms_and_conditions]
+  - key: assumptions_and_dependencies
+    title: Assumptions and Dependencies
+    words: [150, 250]
+    guidance: List the assumptions behind the proposal and what is needed from the buyer.
+    headings: [Assumptions, Buyer Dependencies, Out of Scope]
+    aliases: [assumptions, dependencies, exclusions]
+  - key: deal_storytelling
+    title: Engagement Narrative
+    words: [240, 320]
+    guidance: >-
+      Tell the story of the engagement in four short paragraphs, each led by a bold phrase: where the
+      buyer stands today, the cost of standing still, the path proposed, and what it unlocks.
+    headings: []
+    aliases: [narrative, storyline]
+
+default_sections: [executive_summary, solution_overview, implementation_plan, pricing_notes]
+
+buyer_intelligence:
+  readiness_stages:
+    - {name: Cold, max_score: 15}
+    - {name: Exploring, max_score: 35}
+    - {name: Interested, max_score: 55}
+    - {name: Evaluation Stage, max_score: 70}
+    - {name: High Intent, max_score: 88}
+    - {name: Ready to Buy, max_score: 100}
+  intent_types:
+    - Purchase intent
+    - Information gathering
+    - Vendor comparison
+    - Objection handling
+    - Budget evaluation
+    - Technical validation
+    - Expansion opportunity
+    - Risk concerns
+  gap_types:
+    - Budget Gap
+    - Technical Understanding Gap
+    - Stakeholder Alignment Gap
+    - ROI Clarity Gap
+    - Security/Compliance Concerns
+    - Timeline Misalignment
+    - Product Understanding Gap
+    - Integration Concerns
+  stakeholder_categories:
+    - Decision Maker
+    - Technical Evaluator
+    - Business Champion
+    - Procurement
+    - Security/Compliance
+    - End User
+    - Executive Sponsor
+
+product_fit:
+  fit_stages:
+    - {name: Poor Fit, max_score: 20}
+    - {name: Partial Fit, max_score: 45}
+    - {name: Qualified Fit, max_score: 65}
+    - {name: Strong Fit, max_score: 85}
+    - {name: Strategic Fit, max_score: 100}
+  gap_types:
+    - Capability Gap
+    - Integration Gap
+    - Compliance Gap
+    - Performance/Scale Gap
+    - Services/Delivery Gap
+    - Commercial Fit Gap
+    - Competitive Differentiation Gap
+    - Operational Readiness Gap
+  capability_areas:
+    - Core Functionality
+    - Integration and APIs
+    - Security and Compliance
+    - Scalability and Performance
+    - Implementation and Services
+    - Support and Operations
+    - Analytics and Reporting
+    - Commercial and Licensing
+
+scoring:
+  # Weights for the composite score. Components that cannot be computed for a
+  # run are dropped and the remaining weights are renormalized.
+  weights:
+    requirement_coverage: 0.35
+    quality: 0.20
+    solution_fit: 0.15
+    completeness: 0.15
+    historical_similarity: 0.15
+  default_evaluation_criteria:
+    - Understanding of the buyer's requirements
+    - Quality and feasibility of the proposed solution
+    - Delivery plan and timeline credibility
+    - Relevant experience and evidence
+    - Value for money
+    - Risk management
+
+lexicons:
+  competitors: []
+  compliance_frameworks:
+    - ISO 27001
+    - SOC 2
+    - GDPR
+    - HIPAA
+    - PCI DSS
+    - FedRAMP
+    - NIST 800-53
+    - WCAG 2.1
+
+market_research:
+  default_offerings: []

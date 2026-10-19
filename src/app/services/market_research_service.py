@@ -9,15 +9,16 @@ Pipeline per request:
 3. **Scrape** — for each candidate company, fetch the homepage + /about +
    /pricing pages (short timeout, plain requests + BeautifulSoup) and
    extract clean text (~3 KB total).
-4. **Qwen fallback** — if structured fields are still missing, ask the
-   local Qwen via LLMService to extract them as JSON. Strictly local —
-   no third-party APIs.
+4. **Model extraction** — if structured fields are still missing, the fast
+   model extracts them from the scraped text as strict JSON.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -34,12 +35,15 @@ try:
 except ImportError:  # pragma: no cover
     BeautifulSoup = None  # type: ignore[assignment]
 
-from app.services.llm_service import LLMService, LLMServiceError
+from app.llm.schema import BOOL, STR, arr, obj
+from app.core.logging import get_logger
+from app.llm.errors import LLMServiceError
+from app.llm.service import LLMService
 
 
 _PRICE_RE = re.compile(
     r"\$[\s]?(\d{1,3}(?:[,.]\d{3})*(?:\.\d+)?)"
-    r"(?:\s?(?:k|K|m|M|/mo|/month|/yr|/year|per\s+\w+))?"
+    r"(?:\s?(?:/month|/mo|/year|/yr|k|K|m|M|per\s+\w+))?"
 )
 _RATING_RE = re.compile(r"(\d(?:\.\d)?)\s*(?:/\s*5|out of 5|stars?)", re.I)
 _FOUNDED_RE = re.compile(
@@ -65,7 +69,19 @@ _AGGREGATOR_DOMAINS = {
     "techtarget.com", "cio.com", "datamation.com", "em360tech.com",
     "infoworld.com", "zdnet.com", "computerworld.com", "thectoclub.com",
     "eesel.ai", "openobserve.ai", "biz4group.com",
+    # market-report publishers
+    "futuremarketinsights.com", "marketsandmarkets.com", "grandviewresearch.com", "mordorintelligence.com",
+    "gminsights.com", "fortunebusinessinsights.com", "precedenceresearch.com", "imarcgroup.com",
+    "alliedmarketresearch.com", "researchandmarkets.com", "verifiedmarketresearch.com", "statista.com",
 }
+
+# Titles of pages that write *about* vendors rather than being one: listicles, comparisons, market reports.
+_CONTENT_PAGE = re.compile(
+    r"\b(?:top|best)\s+\d+|\b\d+\s+(?:best|top)\b|\blist of\b|\balternatives?\b|\s+vs\.?\s+|\bcompared\b|"
+    r"\bmarket\s+(?:size|share|report|analysis|forecast|growth|trends?)\b|\bmagic quadrant\b",
+    re.IGNORECASE,
+)
+logger = get_logger(__name__)
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -82,17 +98,19 @@ class CompanyHit:
     contact: str | None = None
     founded_year: int | None = None
     snippet: str = ""
+    description: str = ""
     sources: list[str] = field(default_factory=list)
     scraped_text: str = ""
 
     def age_years(self) -> int | None:
         if self.founded_year is None:
             return None
-        return max(0, datetime.utcnow().year - self.founded_year)
+        return max(0, datetime.now().year - self.founded_year)
 
     def to_row(self) -> dict:
         return {
             "Company": self.name,
+            "About": self.description or (self.snippet[:180] + "…" if len(self.snippet) > 180 else self.snippet) or "—",
             "Matched solutions": ", ".join(self.matched_solutions) or "—",
             "Price": self.price or "—",
             "Review": self.review or "—",
@@ -136,7 +154,7 @@ def _extract_founded(text: str) -> int | None:
     if m:
         try:
             year = int(m.group(1))
-            if 1700 < year <= datetime.utcnow().year:
+            if 1700 < year <= datetime.now().year:
                 return year
         except ValueError:
             pass
@@ -220,30 +238,33 @@ class MarketResearchService:
                 break
         return " ".join(seen_text)[:5000]
 
-    # ── LLM extraction (Qwen via Ollama) ──────────────────────────────────
+    # ── Model extraction (fast tier) ───────────────────────────────────────
     def _llm_extract(self, hit: CompanyHit) -> None:
         if not self.use_llm_extraction or not self.llm_service or not hit.scraped_text:
             return
         prompt = (
-            f"Extract structured facts about the company \"{hit.name}\" from the text below. "
-            f"Return a single JSON object with these keys: price, review, contact, founded_year. "
-            f"Use the literal string \"unknown\" when a field is not present. "
-            f"price = lowest pricing or starting price (e.g., \"$99/month\"). "
-            f"review = numeric rating like \"4.5/5\" if mentioned. "
-            f"contact = a person's full name (CEO/founder/lead). "
-            f"founded_year = 4-digit year as a number, else \"unknown\". "
-            f"Return JSON only, no prose.\n\n"
+            f"Company: {hit.name}\n"
+            "Extract these facts from the text. Use \"unknown\" when a fact is not present.\n"
+            "- price: lowest or starting price as written (for example \"$99/month\")\n"
+            "- review: a numeric rating such as \"4.5/5\"\n"
+            "- contact: a named leader (CEO, founder, or head of sales)\n"
+            "- founded_year: a 4-digit year\n\n"
             f"TEXT:\n{hit.scraped_text[:3000]}"
         )
         try:
-            raw = self.llm_service.generate(
+            result = self.llm_service.complete_json(
+                agent="market_research",
+                system="You extract company facts from web page text and return JSON only.",
                 prompt=prompt,
-                system="You extract structured facts and return strict JSON.",
-                max_tokens=200,
-                temperature=0.0,
+                schema=obj(price=STR, review=STR, contact=STR, founded_year=STR),
+                schema_name="company_facts",
+                purpose="company_facts",
+                max_tokens=800,
+                expected_tokens=150,
             )
         except LLMServiceError:
             return
+        raw = result.text
         data = self._parse_json_loose(raw)
         if not data:
             return
@@ -269,7 +290,7 @@ class MarketResearchService:
                 if m:
                     try:
                         year = int(m.group(1))
-                        if 1700 < year <= datetime.utcnow().year:
+                        if 1700 < year <= datetime.now().year:
                             hit.founded_year = year
                     except ValueError:
                         pass
@@ -321,6 +342,8 @@ class MarketResearchService:
                 title = (r.get("title") or "").strip()
                 href = (r.get("href") or "").strip()
                 body = (r.get("body") or "").strip()
+                if _CONTENT_PAGE.search(title):
+                    continue
                 company = _company_from_result(title, href)
                 if not company:
                     continue
@@ -342,20 +365,68 @@ class MarketResearchService:
             if len(hits_by_company) >= max_companies * 2:
                 break
 
-        ranked = sorted(
+        candidates = sorted(
             hits_by_company.values(),
-            key=lambda h: (-len(h.matched_solutions), h.name.lower()),
-        )[:max_companies]
+            key=lambda h: (-len(h.matched_solutions), -len(h.sources), h.name.lower()),
+        )[: max_companies * 2]
+        ranked = self._vendor_check(candidates, offerings)[:max_companies]
 
+        # Search-based enrichment hits the search engine, so it stays sequential (rate limits);
+        # page fetches and model extraction run in parallel per company.
         for hit in ranked:
             self._enrich_via_search(hit)
+
+        def finish(hit: CompanyHit) -> None:
             hit.scraped_text = self._scrape_company(hit)
             if hit.scraped_text:
                 hit.price = hit.price or _extract_price(hit.scraped_text)
                 hit.review = hit.review or _extract_rating(hit.scraped_text)
                 hit.founded_year = hit.founded_year or _extract_founded(hit.scraped_text)
             self._llm_extract(hit)
+
+        if ranked:
+            with ThreadPoolExecutor(max_workers=min(6, len(ranked)), thread_name_prefix="vendor") as pool:
+                list(pool.map(lambda h: contextvars.copy_context().run(finish, h), ranked))
         return ranked
+
+    def _vendor_check(self, candidates: list[CompanyHit], offerings: list[str]) -> list[CompanyHit]:
+        """Keep companies that sell the offerings (fast model). Without a model, keep the heuristic order."""
+        if not candidates or not self.use_llm_extraction or not self.llm_service:
+            return candidates
+        listing = "\n".join(
+            f"- {h.domain}: {h.name}. Search snippet: {(h.snippet or '')[:220]}" for h in candidates
+        )
+        try:
+            result = self.llm_service.complete_json(
+                agent="market_research",
+                system=(
+                    "You screen web search results for a sales team. A vendor is a company that sells a product or "
+                    "service matching the offerings. Publishers, blogs, consultancies writing about the topic, job "
+                    "sites, and generic tools that only mention it are not vendors. Return JSON only."
+                ),
+                prompt=f"Offerings: {', '.join(offerings)}\n\nCandidates:\n{listing}",
+                schema=obj(vendors=arr(obj(domain=STR, is_vendor=BOOL, description=STR))),
+                schema_name="vendor_screen",
+                purpose="vendor_screen",
+                max_tokens=2500,
+                expected_tokens=600,
+            )
+        except LLMServiceError as exc:
+            logger.info("Vendor screening skipped: %s", exc)
+            return candidates
+        verdicts = {
+            str(v.get("domain", "")).lower().removeprefix("www."): v
+            for v in (result.parsed or {}).get("vendors", [])
+            if isinstance(v, dict)
+        }
+        kept = []
+        for hit in candidates:
+            verdict = verdicts.get(hit.domain)
+            if verdict is None or verdict.get("is_vendor"):
+                if verdict and verdict.get("description"):
+                    hit.description = str(verdict["description"]).strip()[:240]
+                kept.append(hit)
+        return kept
 
     def _enrich_via_search(self, hit: CompanyHit) -> None:
         missing_any = not (hit.price and hit.review and hit.founded_year)

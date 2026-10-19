@@ -1,5 +1,9 @@
 # Agentic Migration
 
+> **Note (October 2026):** this document records the move to the agentic runtime. The platform now runs on
+> Groq (`openai/gpt-oss-120b` and `openai/gpt-oss-20b`) with domain profiles, caching, rate limiting, and token
+> reports. See README.md for the current setup; references to Mistral, Qwen, and Ollama below are historical.
+
 This document records what changed when the platform moved from a hard-coded
 sequential pipeline to an end-to-end agentic runtime.
 

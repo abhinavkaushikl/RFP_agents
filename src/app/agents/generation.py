@@ -1,9 +1,19 @@
+"""Section generation agent (frontier model, Redis section cache)."""
 from __future__ import annotations
 
 from app.agents.base import PlatformAgent
-from app.agents.prompts import SYSTEM_PROMPT, SectionPromptContext, build_section_prompt
+from app.agents.prompts import SectionPromptContext, build_section_messages
+from app.core.config import get_settings
+from app.domain.profile import DomainProfile, load_profile
+from app.llm.errors import LLMServiceError
+from app.llm.service import LLMService
 from app.schemas.domain import AgentContext, AgentResult
-from app.services.llm_service import LLMService, LLMServiceError
+
+_CONTEXT_KEYS = (
+    "client_name", "industry", "solution_type", "title", "request_summary", "requirements",
+    "requirement_details", "evaluation_criteria", "timeline", "budget", "compliance_requirements",
+    "vendors", "positioning_notes", "user_instruction",
+)
 
 
 class GenerationAgent(PlatformAgent):
@@ -13,142 +23,89 @@ class GenerationAgent(PlatformAgent):
         self.llm = llm_service
 
     def run(self, payload: dict, context: AgentContext) -> AgentResult:
-        section = payload["section_key"]
-        evidence = payload.get("evidence", [])
-        offerings = payload.get("matching_offerings", [])
+        profile = load_profile(payload.get("profile"))
+        section_key = profile.canonical_section_key(payload["section_key"])
+        section = profile.section(section_key)
+        evidence = payload.get("evidence") or []
+        ctx = SectionPromptContext(**{k: payload.get(k) for k in _CONTEXT_KEYS if payload.get(k) is not None})
+        ctx["offerings"] = payload.get("matching_offerings") or []
+        citations = [item.get("chunk_id") or item.get("id") or "" for item in evidence[:4]]
 
         if payload.get("fast_mode"):
-            draft_text = self._fast_draft(
-                section=section,
-                client_name=payload.get("client_name", "the client"),
-                industry=payload.get("industry", "Telecommunications"),
-                request_summary=payload.get("request_summary", ""),
-                requirements=payload.get("requirements", []),
-                offerings=offerings,
-                evidence=evidence,
-            )
-            return AgentResult(
-                self.name,
-                {
-                    "section_key": section,
-                    "draft_text": draft_text,
-                    "citations": [item.get("chunk_id", item.get("id", "")) for item in evidence[:3]],
-                    "generation_notes": [
-                        f"Generated {section} with fast deterministic draft mode using {len(evidence)} retrieved chunks."
-                    ],
-                },
-                f"Generated {section} fast draft ({len(draft_text)} chars).",
-                0.72,
-            )
+            draft = self._template_draft(profile, section_key, ctx, evidence)
+            return self._result(section_key, section.title, draft, citations, "template", None, False,
+                                ["Template draft (fast mode); no model call."], 0.5)
 
-        ctx = SectionPromptContext(
-            section_key=section,
-            client_name=payload.get("client_name", "the client"),
-            industry=payload.get("industry", "Telecommunications"),
-            request_summary=payload.get("request_summary", ""),
-            requirements=payload.get("requirements", []),
-            vendors=payload.get("vendors", []),
-            offerings=offerings,
-            evidence_chunks=[item.get("content", "") for item in evidence[:2]],
-            solution_type=payload.get("solution_type", "aiops_general"),
-        )
-
-        prompt = build_section_prompt(section, ctx)
-
-        notes: list[str] = []
-        draft_text = ""
+        settings = get_settings()
+        messages = build_section_messages(profile, ctx, section_key, evidence, settings.retrieval_top_k)
+        low, high = section.words
         try:
-            draft_text = self.llm.generate(prompt=prompt, system=SYSTEM_PROMPT)
+            result = self.llm.complete(
+                agent=self.name,
+                messages=messages,
+                section_key=section_key,
+                cache_kind="section",
+                purpose="generate_section",
+                max_tokens=max(2500, high * 4 + 1500),
+                expected_tokens=high * 2 + 600,
+            )
         except LLMServiceError as exc:
-            notes.append(f"LLM call failed for {section}: {exc}. Falling back to deterministic draft.")
+            if not self.llm.degraded_allowed:
+                raise
+            draft = self._template_draft(profile, section_key, ctx, evidence)
+            return self._result(section_key, section.title, draft, citations, "fallback", None, False,
+                                [f"Model call failed ({exc}); template draft used."], 0.4)
 
-        if not draft_text.strip():
-            draft_text = self._fast_draft(
-                section=section,
-                client_name=payload.get("client_name", "the client"),
-                industry=payload.get("industry", "Telecommunications"),
-                request_summary=payload.get("request_summary", ""),
-                requirements=payload.get("requirements", []),
-                offerings=offerings,
-                evidence=evidence,
-            )
-            notes.append(f"Used deterministic fallback for {section}.")
-            confidence = 0.6
-        else:
-            notes.append(
-                f"Generated {section} via {self.llm.model} using {len(evidence)} retrieved chunks."
-            )
-            confidence = 0.85
+        mode = "cache" if result.cache_hit else "llm"
+        notes = [
+            f"{'Served from section cache' if result.cache_hit else 'Generated'} with {result.model} "
+            f"using {len(evidence)} precedent chunks."
+        ]
+        return self._result(section_key, section.title, result.text, citations, mode, result.model,
+                            result.cache_hit, notes, 0.85, usage=result.usage.to_dict())
 
+    def _result(self, section_key, title, draft, citations, mode, model, cache_hit, notes, confidence, usage=None):
         output = {
-            "section_key": section,
-            "draft_text": draft_text,
-            "citations": [item.get("chunk_id", item.get("id", "")) for item in evidence[:3]],
+            "section_key": section_key,
+            "title": title,
+            "draft_text": draft,
+            "citations": citations,
+            "generation_mode": mode,
+            "model": model,
+            "cache_hit": cache_hit,
+            "word_count": len(draft.split()),
             "generation_notes": notes,
         }
-        return AgentResult(
-            self.name,
-            output,
-            f"Generated {section} draft ({len(draft_text)} chars).",
-            confidence,
-        )
+        if usage:
+            output["usage"] = {
+                k: usage.get(k)
+                for k in ("prompt_tokens", "cached_prompt_tokens", "completion_tokens", "total_tokens",
+                          "cost_usd", "saved_tokens", "latency_ms")
+            }
+        return AgentResult(self.name, output, f"{title}: {output['word_count']} words ({mode}).", confidence)
 
-    def _fast_draft(
-        self,
-        *,
-        section: str,
-        client_name: str,
-        industry: str,
-        request_summary: str,
-        requirements: list[str],
-        offerings: list[str],
-        evidence: list[dict],
-    ) -> str:
-        section_title = section.replace("_", " ").title()
-        top_requirements = requirements[:5] or [request_summary[:220] or "Address the stated RFP priorities."]
-        top_offerings = offerings[:4] or ["platform integration", "analytics", "managed operations"]
-        evidence_points = [
-            item.get("content", "").strip()
-            for item in evidence[:2]
-            if item.get("content", "").strip()
-        ]
-
-        lines = [
-            section_title,
-            "",
-            "Strategic Context",
-            (
-                f"{client_name} is evaluating a {industry} proposal that requires a practical, evidence-led "
-                "response. The proposed approach focuses on measurable operational improvement, delivery "
-                "clarity, and reuse of relevant historical proposal evidence."
-            ),
-            "",
-            "Requirements",
-        ]
-        lines.extend(f"{index}. {item}" for index, item in enumerate(top_requirements, 1))
-        lines.extend(["", "Relevant Offerings"])
-        lines.extend(f"- {item}" for item in top_offerings)
-        lines.extend(
-            [
-                "",
-                "Recommended Response",
-                (
-                    f"Our response for {client_name} should position the solution around the selected offerings, "
-                    "connect each requirement to an implementation action, and keep the proposal grounded in "
-                    "retrieved precedent."
-                ),
-            ]
-        )
-        if evidence_points:
-            lines.extend(["", "Retrieved Evidence Used"])
-            lines.extend(f"- {point[:260]}" for point in evidence_points)
-        lines.extend(
-            [
-                "",
-                "Next Steps",
-                "1. Confirm scope, stakeholders, and expected timeline.",
-                "2. Validate integrations, operational constraints, and success metrics.",
-                "3. Finalize the implementation plan and commercial assumptions.",
-            ]
-        )
+    def _template_draft(self, profile: DomainProfile, section_key: str, ctx: SectionPromptContext, evidence: list[dict]) -> str:
+        """Deterministic outline used only in fast mode or degraded mode."""
+        section = profile.section(section_key)
+        client = ctx.get("client_name") or "the client"
+        requirements = (ctx.get("requirements") or [])[:6]
+        offerings = (ctx.get("offerings") or [])[:4]
+        lines = [f"**{section.title}**", ""]
+        summary = (ctx.get("request_summary") or "").strip()
+        if summary:
+            lines += [f"**Context.** {summary}", ""]
+        if requirements:
+            lines.append(f"**Requirements addressed for {client}**")
+            lines += [f"- {r}" for r in requirements]
+            lines.append("")
+        if offerings:
+            lines.append("**Relevant capabilities**")
+            lines += [f"- {o}" for o in offerings]
+            lines.append("")
+        points = [" ".join((e.get("content") or "").split())[:240] for e in evidence[:2] if e.get("content")]
+        if points:
+            lines.append("**Precedent to adapt**")
+            lines += [f"- {p}" for p in points]
+            lines.append("")
+        lines.append("_Draft outline generated without the model. Regenerate with the model before submission._")
         return "\n".join(lines)

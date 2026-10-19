@@ -1,13 +1,15 @@
 """Bulk-load historical RFP records into pgvector.
 
 Reads a JSONL file (one JSON record per line) and ingests every record into
-PostgreSQL via the IngestionService, generating real 384-dim sentence-transformer
-embeddings stored in the embedding_chunks table.
+PostgreSQL via the IngestionService, generating sentence-transformer embeddings
+stored in the embedding_chunks table. Section names and industries are
+canonicalized with the chosen domain profile; records already loaded from the
+same source are skipped, so the script is safe to re-run.
 
 Example:
     PYTHONPATH=src python3 scripts/load_proposals.py \\
-        --input data/raw/rfp_records.jsonl \\
-        --source rfp-records-200
+        --input data/samples/rfp_records.sample.jsonl \\
+        --source samples --profile default
 """
 from __future__ import annotations
 
@@ -36,6 +38,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, help="Path to JSONL file")
     parser.add_argument("--source", default="bulk-load", help="source_name tag for the import")
+    parser.add_argument("--profile", default=None, help="Domain profile used to canonicalize sections and industries")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -60,6 +63,7 @@ def main() -> int:
     total_ingested = 0
     total_sections = 0
     total_chunks = 0
+    total_skipped = 0
 
     for batch_start in range(0, len(records), args.batch_size):
         batch = records[batch_start : batch_start + args.batch_size]
@@ -68,7 +72,7 @@ def main() -> int:
         db = SessionLocal()
         try:
             ingestion = IngestionService(db=db, embedding_service=embedding_service)
-            result = ingestion.ingest_historical(batch, source_name=args.source)
+            result = ingestion.ingest_historical(batch, source_name=args.source, profile_name=args.profile)
         except Exception:
             db.rollback()
             raise
@@ -78,12 +82,14 @@ def main() -> int:
         total_ingested += result["ingested_count"]
         total_sections += result["section_count"]
         total_chunks += result["chunk_count"]
+        total_skipped += result.get("skipped_duplicates", 0) + len(result.get("skipped", []))
 
     print("")
     print("=== Done ===")
     print(f"  records ingested: {total_ingested}")
     print(f"  sections persisted: {total_sections}")
     print(f"  chunks embedded: {total_chunks}")
+    print(f"  records skipped (duplicates or no text): {total_skipped}")
     return 0
 
 

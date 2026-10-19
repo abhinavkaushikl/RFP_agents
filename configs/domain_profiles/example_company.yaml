@@ -1,0 +1,40 @@
+# Example company profile. It inherits everything from `default` and adds an
+# organization description and an offering catalog. Replace the contents with
+# your own and select it with `"profile": "example_company"` or
+# RFP_DEFAULT_PROFILE=example_company.
+
+extends: default
+
+display_name: Example company (sample catalog)
+description: Shows how to describe your organization and offering catalog. Edit or copy it.
+
+organization:
+  name: Northbeam Solutions
+  description: A delivery partner for digital platforms, data, and managed services.
+  differentiators:
+    - Fixed-scope discovery in the first four weeks
+    - Named delivery lead for the whole engagement
+    - Outcome-based service levels
+
+offerings:
+  - code: digital_platforms
+    name: Digital Platform Delivery
+    description: Design, build, and integration of customer- and employee-facing applications.
+    capabilities: [Product discovery, UX design, web and mobile development, API integration, QA automation]
+    differentiators: [Reusable accelerators for common integrations]
+    keywords: [portal, application, website, mobile, integration, api, ux]
+  - code: data_analytics
+    name: Data and Analytics
+    description: Data platforms, reporting, and analytics programs.
+    capabilities: [Data migration, data warehousing, dashboards and reporting, data governance, machine learning models]
+    differentiators: [Governance-first delivery model]
+    keywords: [data, analytics, reporting, dashboard, warehouse, bi, migration]
+  - code: managed_services
+    name: Managed Services
+    description: Ongoing operation, support, and continuous improvement of delivered systems.
+    capabilities: [24x7 service desk, application support, monitoring, incident management, continuous improvement]
+    differentiators: [Outcome-based service levels]
+    keywords: [support, managed, operations, service desk, sla, monitoring, maintenance]
+
+market_research:
+  default_offerings: [digital platform delivery, data analytics services, managed application services]

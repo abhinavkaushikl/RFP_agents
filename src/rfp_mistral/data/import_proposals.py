@@ -1,3 +1,16 @@
+"""Convert proposal exports (JSON arrays or JSONL) into RFPRecord JSONL and training examples.
+
+Works with any corpus. Field names are detected from common conventions, and a
+`--field-map` JSON file can map source fields to section keys explicitly:
+
+    {"exec_summary": "executive_summary", "delivery": "implementation_plan"}
+
+Example:
+    PYTHONPATH=src python -m rfp_mistral.data.import_proposals \\
+        --input exports/proposals_2024.json exports/proposals_2025.jsonl \\
+        --raw-output data/raw/rfp_records.jsonl \\
+        --train-output data/processed/train.jsonl
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,235 +23,126 @@ from rfp_mistral.data.io import write_jsonl, write_training_examples
 from rfp_mistral.data.prepare_dataset import build_training_examples
 from rfp_mistral.schemas import RFPRecord
 
-DEFAULT_ULTRA_INPUT = Path.home() / "Downloads" / "final_ultra_proposals_100.json"
-DEFAULT_TONE_INPUT = (
-    Path.home() / "Downloads" / "ultimate_proposals_with_tone_visuals(1).json"
-)
-DEFAULT_RAW_OUTPUT = Path("data/raw/rfp_records.jsonl")
-DEFAULT_TRAIN_OUTPUT = Path("data/processed/train.jsonl")
-
-CLIENT_INDUSTRY_MAP = {
-    "AT&T US": "Telecommunications",
-    "Airtel India": "Telecommunications",
-    "BT Group UK": "Telecommunications",
-    "Etisalat UAE": "Telecommunications",
-    "MTN Africa": "Telecommunications",
-    "Orange France": "Telecommunications",
-    "Reliance Jio": "Telecommunications",
-    "T-Mobile US": "Telecommunications",
-    "Telefonica Spain": "Telecommunications",
-    "Vodafone EU": "Telecommunications",
+DEFAULT_EVALUATION_CRITERIA = [
+    "Understanding of the buyer's requirements",
+    "Quality and feasibility of the proposed solution",
+    "Delivery plan and timeline credibility",
+    "Value for money",
+]
+_METADATA = {
+    "id", "client", "client_name", "customer", "industry", "sector", "title", "rfp_title", "name",
+    "rfp_summary", "summary", "requirements", "evaluation_criteria", "tags", "solution_type",
+    "proposal_sections", "sections", "metadata",
 }
+_MIN_SECTION_CHARS = 80
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Merge proposal sample JSON files into normalized raw and training datasets."
-    )
-    parser.add_argument(
-        "--ultra-input",
-        default=str(DEFAULT_ULTRA_INPUT),
-        help="Path to the core proposal JSON file",
-    )
-    parser.add_argument(
-        "--tone-input",
-        default=str(DEFAULT_TONE_INPUT),
-        help="Path to the tone and visuals proposal JSON file",
-    )
-    parser.add_argument(
-        "--raw-output",
-        default=str(DEFAULT_RAW_OUTPUT),
-        help="Output path for normalized raw JSONL records",
-    )
-    parser.add_argument(
-        "--train-output",
-        default=str(DEFAULT_TRAIN_OUTPUT),
-        help="Output path for instruction-tuning JSONL examples",
-    )
-    parser.add_argument(
-        "--target-section",
-        default="all",
-        help="Proposal section to prepare for training, or 'all' for every section",
-    )
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--input", nargs="+", required=True, help="JSON array or JSONL files")
+    parser.add_argument("--raw-output", default="data/raw/rfp_records.jsonl")
+    parser.add_argument("--train-output", default="data/processed/train.jsonl")
+    parser.add_argument("--target-section", default="all", help="Section to train on, or 'all'")
+    parser.add_argument("--default-industry", default="", help="Industry for records that do not state one")
+    parser.add_argument("--field-map", help="JSON file mapping source field names to section keys")
     return parser.parse_args()
 
 
-def _read_json(path: str | Path) -> list[dict[str, Any]]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError(f"Expected a JSON array in {path}")
-    return [item for item in payload if isinstance(item, dict)]
-
-
-def _labelize(text: str) -> str:
-    return text.replace("_", " ").strip().title()
+def _read_records(path: str | Path) -> list[dict[str, Any]]:
+    text = Path(path).read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        payload = json.loads(text)
+        return [item for item in payload if isinstance(item, dict)]
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
 def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return slug or "record"
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_") or "section"
 
 
-def _stringify_scalar(value: Any) -> str:
+def _stringify(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    return str(value)
-
-
-def _flatten_kv_items(payload: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    for key, value in payload.items():
-        label = _labelize(key)
-        if isinstance(value, dict):
-            nested = ", ".join(_flatten_kv_items(value))
-            if nested:
-                lines.append(f"{label}: {nested}")
-        elif isinstance(value, list):
-            rendered = ", ".join(_stringify_scalar(item) for item in value if item is not None)
-            if rendered:
-                lines.append(f"{label}: {rendered}")
-        else:
-            rendered = _stringify_scalar(value)
-            if rendered:
-                lines.append(f"{label}: {rendered}")
-    return lines
-
-
-def _format_section_value(value: Any) -> str:
-    if isinstance(value, str):
-        return value.strip()
     if isinstance(value, dict):
-        lines = _flatten_kv_items(value)
-        return "\n".join(f"- {line}" for line in lines)
+        return "\n".join(f"- {k.replace('_', ' ').capitalize()}: {_stringify(v)}" for k, v in value.items() if _stringify(v))
     if isinstance(value, list):
-        return "\n".join(f"- {_stringify_scalar(item)}" for item in value if item is not None)
-    return _stringify_scalar(value).strip()
+        return "\n".join(f"- {_stringify(v)}" for v in value if _stringify(v))
+    return str(value).strip()
 
 
-def _build_requirements(record: dict[str, Any]) -> list[str]:
-    requirements: list[str] = []
-    for field in ("client_kpis", "delivery", "contract_annexure", "visual_assets", "negotiation_hooks"):
-        value = record.get(field)
-        if isinstance(value, dict):
-            requirements.extend(_flatten_kv_items(value))
-    if isinstance(record.get("financials"), dict):
-        requirements.extend(_flatten_kv_items(record["financials"]))
-    if isinstance(record.get("roi_summary"), dict):
-        requirements.extend(_flatten_kv_items(record["roi_summary"]))
-    return requirements
-
-
-def _build_evaluation_criteria(record: dict[str, Any]) -> list[str]:
-    criteria = [
-        "Business impact and ROI clarity",
-        "Technical fit for telecom operations",
-        "Delivery feasibility and timeline confidence",
-        "Commercial flexibility and implementation value",
-    ]
-    if record.get("competitor_positioning"):
-        criteria.append("Differentiation against incumbent vendors")
-    if record.get("visual_assets"):
-        criteria.append("Executive-friendly presentation and visual storytelling")
-    return criteria
-
-
-def _build_sections(record: dict[str, Any], source: str) -> dict[str, str]:
-    field_map = {
-        "executive_summary": "executive_summary",
-        "tone_specific_summary": "tone_specific_summary",
-        "deal_storytelling": "deal_storytelling",
-        "competitor_positioning": "competitor_positioning",
-        "architecture_diagram_text": "architecture_diagram",
-        "financials": "financials",
-        "pricing": "pricing_notes",
-        "contract_annexure": "contract_annexure",
-        "delivery": "implementation_plan",
-        "visual_assets": "visual_assets",
-        "negotiation_hooks": "negotiation_hooks",
-        "roi_summary": "roi_summary",
-    }
-    sections: dict[str, str] = {}
-    for source_key, target_key in field_map.items():
-        value = record.get(source_key)
-        if value in (None, "", [], {}):
+def _sections(record: dict[str, Any], field_map: dict[str, str]) -> dict[str, str]:
+    raw = record.get("proposal_sections") or record.get("sections")
+    if isinstance(raw, dict):
+        return {_slugify(k): _stringify(v) for k, v in raw.items() if _stringify(v)}
+    if isinstance(raw, list):
+        out: dict[str, str] = {}
+        for entry in raw:
+            if isinstance(entry, dict):
+                key = entry.get("key") or entry.get("title") or entry.get("heading") or "section"
+                text = _stringify(entry.get("content") or entry.get("text"))
+                if text:
+                    out[_slugify(key)] = text
+        return out
+    out = {}
+    for source_key, value in record.items():
+        if source_key in field_map:
+            target = field_map[source_key]
+        elif source_key.lower() in _METADATA:
             continue
-        rendered = _format_section_value(value)
-        if rendered:
-            sections[target_key] = rendered
-
-    if "executive_summary" not in sections and "tone_specific_summary" in sections:
-        sections["executive_summary"] = sections["tone_specific_summary"]
-    if "pricing_notes" not in sections and "financials" in sections:
-        sections["pricing_notes"] = sections["financials"]
-
-    sections["source_dataset"] = source
-    return sections
+        else:
+            target = _slugify(source_key)
+        text = _stringify(value)
+        if text and (source_key in field_map or len(text) >= _MIN_SECTION_CHARS):
+            out[target] = f"{out[target]}\n\n{text}" if target in out else text
+    return out
 
 
-def _build_summary(record: dict[str, Any], sections: dict[str, str]) -> str:
-    parts = [
-        _stringify_scalar(record.get("executive_summary")),
-        _stringify_scalar(record.get("tone_specific_summary")),
-        _stringify_scalar(record.get("deal_storytelling")),
-    ]
-    summary = " ".join(part.strip() for part in parts if part and part.strip())
-    if summary:
-        return summary
-    for key in ("executive_summary", "tone_specific_summary", "deal_storytelling"):
-        if key in sections:
-            return sections[key]
-    return "Telecom transformation proposal focused on measurable operational outcomes."
-
-
-def normalize_record(record: dict[str, Any], source: str, sequence: int) -> RFPRecord:
-    client_name = _stringify_scalar(record.get("client")) or "Unknown Client"
-    sections = _build_sections(record, source)
-    summary = _build_summary(record, sections)
-    requirements = _build_requirements(record)
-
+def normalize_record(
+    record: dict[str, Any],
+    source: str,
+    sequence: int,
+    *,
+    default_industry: str = "",
+    field_map: dict[str, str] | None = None,
+) -> RFPRecord:
+    client = _stringify(record.get("client_name") or record.get("client") or record.get("customer")) or "Unknown client"
+    industry = _stringify(record.get("industry") or record.get("sector")) or default_industry
+    sections = _sections(record, field_map or {})
+    summary = _stringify(record.get("rfp_summary") or record.get("summary")) or sections.get("executive_summary", "")[:600]
+    requirements = record.get("requirements")
+    criteria = record.get("evaluation_criteria")
+    tags = record.get("tags") if isinstance(record.get("tags"), list) else [t for t in (_slugify(industry), _slugify(client)) if t]
     return RFPRecord(
-        id=f"{_slugify(source)}-{sequence:03d}",
-        client_name=client_name,
-        industry=CLIENT_INDUSTRY_MAP.get(client_name, "Telecommunications"),
-        rfp_title=f"AIOps Transformation Proposal for {client_name}",
+        id=str(record.get("id") or f"{_slugify(source)}-{sequence:04d}"),
+        client_name=client,
+        industry=industry,
+        rfp_title=_stringify(record.get("title") or record.get("rfp_title")) or f"Proposal for {client}",
         rfp_summary=summary,
-        requirements=requirements,
-        evaluation_criteria=_build_evaluation_criteria(record),
-        solution_summary=sections.get("executive_summary", summary),
+        requirements=[_stringify(r) for r in requirements] if isinstance(requirements, list) else [],
+        evaluation_criteria=[_stringify(c) for c in criteria] if isinstance(criteria, list) else list(DEFAULT_EVALUATION_CRITERIA),
+        solution_summary=sections.get("solution_overview") or sections.get("executive_summary", summary),
         proposal_sections=sections,
-        tags=[
-            "telecommunications",
-            "aiops",
-            "proposal",
-            _slugify(client_name),
-            _slugify(source),
-        ],
+        tags=[str(t) for t in tags],
     )
 
 
 def main() -> None:
     args = parse_args()
-
-    ultra_records = _read_json(args.ultra_input)
-    tone_records = _read_json(args.tone_input)
-
-    records = [
-        *[
-            normalize_record(record, "final_ultra_proposals_100", index)
-            for index, record in enumerate(ultra_records, start=1)
-        ],
-        *[
-            normalize_record(record, "ultimate_proposals_with_tone_visuals", index)
-            for index, record in enumerate(tone_records, start=1)
-        ],
-    ]
-
+    field_map = json.loads(Path(args.field_map).read_text(encoding="utf-8")) if args.field_map else {}
+    records: list[RFPRecord] = []
+    for path in args.input:
+        source = Path(path).stem
+        for index, raw in enumerate(_read_records(path), start=1):
+            record = normalize_record(raw, source, index, default_industry=args.default_industry, field_map=field_map)
+            if record.proposal_sections:
+                records.append(record)
     write_jsonl(args.raw_output, (record.__dict__ for record in records))
     examples = build_training_examples(records, args.target_section)
     write_training_examples(args.train_output, examples)
-
     print(f"Wrote {len(records)} raw records to {args.raw_output}")
     print(f"Wrote {len(examples)} training examples to {args.train_output}")
 

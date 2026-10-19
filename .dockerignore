@@ -1,0 +1,14 @@
+.venv/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+.env
+out/
+data/raw/
+data/processed/
+data/index/
+checkpoints/
+notebooks/
+tests/
+web/node_modules/
+web/dist/

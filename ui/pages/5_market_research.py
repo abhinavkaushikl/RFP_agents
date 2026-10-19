@@ -4,7 +4,9 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from utils.api_client import run_market_research
+from utils.api_client import APIError, run_market_research
+from utils.profile import active_profile_name, get_active_profile
+from utils.token_usage import accumulate_session_usage, render_token_usage
 from utils.theme import (
     apply_theme,
     render_header,
@@ -33,10 +35,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DEFAULT_OFFERINGS = [
-    "AIOps platform", "network observability",
-    "incident response automation", "log analytics", "anomaly detection",
-]
+_PROFILE = get_active_profile()
+DEFAULT_OFFERINGS = list(_PROFILE.get("market_research", {}).get("default_offerings") or [])
+DEFAULT_OFFERINGS += [o["name"] for o in _PROFILE.get("offerings", []) if o["name"] not in DEFAULT_OFFERINGS]
 
 with st.form("market_research_form"):
     col1, col2 = st.columns([0.55, 0.45], gap="large")
@@ -45,13 +46,13 @@ with st.form("market_research_form"):
         offerings_picked = st.multiselect(
             "Select Offerings",
             options=DEFAULT_OFFERINGS,
-            default=["AIOps platform", "network observability"],
-            help="Pick two or more so the agent can also look for vendors that bundle them.",
-        )
+            default=DEFAULT_OFFERINGS[:2],
+            help="Suggestions come from the active domain profile. Pick two or more to also find vendors that bundle them.",
+        ) if DEFAULT_OFFERINGS else []
         custom_offerings = st.text_input(
             "Custom Offerings (comma-separated)",
             value="",
-            placeholder="e.g., synthetic monitoring, RAG platform",
+            placeholder="e.g., e-signature platform, field service management",
         )
         requirement_summary = st.text_area(
             "Requirement Summary (optional)",
@@ -62,8 +63,7 @@ with st.form("market_research_form"):
         render_section_header("Filters", icon="tune")
         industry = st.selectbox(
             "Industry (optional)",
-            options=["", "Telecommunications", "Healthcare", "Financial Services",
-                     "Retail", "Manufacturing", "Public Sector"],
+            options=["", *_PROFILE.get("industries", [])],
             index=0,
         )
         max_companies = st.slider("Max Companies", 4, 15, value=8)
@@ -88,7 +88,7 @@ def _merge_offerings() -> list[str]:
 if submitted:
     final_offerings = _merge_offerings()
     if not final_offerings:
-        st.warning("Pick at least one offering to research.")
+        st.warning("Pick or type at least one offering to research.")
         st.stop()
 
     with st.spinner(f"Searching the web for {len(final_offerings)} offering(s)..."):
@@ -98,7 +98,11 @@ if submitted:
                 requirement_summary=requirement_summary.strip(),
                 industry=industry or None,
                 max_companies=max_companies,
+                profile=active_profile_name(),
             )
+        except APIError as exc:
+            st.error(f"Research failed: {exc}")
+            st.stop()
         except Exception as exc:
             st.error(f"Research failed: {exc}")
             st.stop()
@@ -130,6 +134,9 @@ if submitted:
             "Matched solutions": st.column_config.TextColumn("Matched solutions", width="large"),
         },
     )
+
+    accumulate_session_usage(result.get("token_usage"))
+    render_token_usage(result.get("token_usage"), title="Market Research Token Usage")
 
     # ── Agent Trace ─────────────────────────────────────────────────────
     from utils.agent_trace import render_agent_trace
