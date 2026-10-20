@@ -416,18 +416,15 @@ export function AppShell() {
             </div>
           </header>
           <main ref={mainRef} className="relative min-h-0 flex-1 overflow-y-auto">
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={location.pathname.split("/").slice(0, 3).join("/")}
-                variants={pageVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className="min-h-full"
-              >
-                {outlet}
-              </motion.div>
-            </AnimatePresence>
+            <motion.div
+              key={location.pathname.split("/").slice(0, 3).join("/")}
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              className="min-h-full"
+            >
+              {outlet}
+            </motion.div>
           </main>
         </div>
       </div>

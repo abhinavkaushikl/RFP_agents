@@ -15,16 +15,34 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { ApiError } from "@/lib/api";
 
 const Login = lazy(() => import("@/pages/Login"));
-const Home = lazy(() => import("@/pages/Home"));
-const Proposals = lazy(() => import("@/pages/Proposals"));
-const NewProposal = lazy(() => import("@/pages/NewProposal"));
-const Workspace = lazy(() => import("@/pages/Workspace"));
-const DealAnalysis = lazy(() => import("@/pages/DealAnalysis"));
-const BidCheck = lazy(() => import("@/pages/BidCheck"));
-const MarketScan = lazy(() => import("@/pages/MarketScan"));
-const KnowledgeBase = lazy(() => import("@/pages/KnowledgeBase"));
-const Usage = lazy(() => import("@/pages/Usage"));
-const Settings = lazy(() => import("@/pages/Settings"));
+const pageLoaders = {
+  Home: () => import("@/pages/Home"),
+  Proposals: () => import("@/pages/Proposals"),
+  NewProposal: () => import("@/pages/NewProposal"),
+  Workspace: () => import("@/pages/Workspace"),
+  DealAnalysis: () => import("@/pages/DealAnalysis"),
+  BidCheck: () => import("@/pages/BidCheck"),
+  MarketScan: () => import("@/pages/MarketScan"),
+  KnowledgeBase: () => import("@/pages/KnowledgeBase"),
+  Usage: () => import("@/pages/Usage"),
+  Settings: () => import("@/pages/Settings"),
+};
+const Home = lazy(pageLoaders.Home);
+const Proposals = lazy(pageLoaders.Proposals);
+const NewProposal = lazy(pageLoaders.NewProposal);
+const Workspace = lazy(pageLoaders.Workspace);
+const DealAnalysis = lazy(pageLoaders.DealAnalysis);
+const BidCheck = lazy(pageLoaders.BidCheck);
+const MarketScan = lazy(pageLoaders.MarketScan);
+const KnowledgeBase = lazy(pageLoaders.KnowledgeBase);
+const Usage = lazy(pageLoaders.Usage);
+const Settings = lazy(pageLoaders.Settings);
+
+// Fetch the other pages once the browser is idle, so moving between them never waits on a download.
+const whenIdle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+(whenIdle ?? ((cb: () => void) => window.setTimeout(cb, 2500)))(() => {
+  for (const load of Object.values(pageLoaders)) void load();
+});
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 const queryClient = new QueryClient({

@@ -19,11 +19,13 @@ export const spring = {
 /** Press feedback for anything clickable. */
 export const press = { whileTap: { scale: 0.97 }, transition: spring.snappy };
 
-/** Page enter/exit — scale + fade gives spatial depth. */
+/**
+ * Page enter. The new page replaces the old one in place and eases up from a soft 40% fade with a
+ * few pixels of travel: no fade-out to an empty screen first, which read as a flash between pages.
+ */
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 12, scale: 0.993 },
-  animate: { opacity: 1, y: 0, scale: 1, transition: spring.smooth },
-  exit: { opacity: 0, y: -6, scale: 0.997, transition: { duration: 0.14, ease: "easeIn" } },
+  initial: { opacity: 0.4, y: 6 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } },
 };
 
 /** Stagger container — wrap a list; children use listItemVariants. */
