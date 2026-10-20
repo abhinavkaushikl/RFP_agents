@@ -23,3 +23,13 @@ def workflow_usage(workflow_id: str, store: RunStore = Depends(get_run_store)) -
 def usage_summary(days: int = Query(7, ge=1, le=365), store: RunStore = Depends(get_run_store)) -> dict:
     """Aggregate token and cost usage over the last N days."""
     return store.usage_summary(days)
+
+
+@router.get("/runs")
+def usage_by_run(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(12, ge=1, le=50),
+    store: RunStore = Depends(get_run_store),
+) -> dict:
+    """Tokens per proposal run, split by section, for the most recent runs in the last N days."""
+    return store.usage_by_run(days=days, limit=limit)

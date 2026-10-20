@@ -1,8 +1,21 @@
 import clsx from "clsx";
 import { motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { spring } from "@/lib/motion";
+
+function useWidth<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
 
 function niceMax(value: number): number {
   if (value <= 0) return 1;
@@ -91,6 +104,164 @@ export function ColumnChart({ data, format, height = 180, label }: {
           ))}
         </div>
       </div>
+    </figure>
+  );
+}
+
+export interface StackSeries {
+  key: string;
+  label: string;
+  color: string;
+}
+
+export interface StackColumn {
+  id: string;
+  label: string;
+  sub?: string;
+  values: Record<string, number>;
+  /** Items folded into one series (e.g. "Other"), listed under it in the readout. */
+  breakdown?: Record<string, { label: string; value: number }[]>;
+  /** An extra line in the readout, e.g. the cost. */
+  note?: string;
+  disabled?: boolean;
+}
+
+/**
+ * Stacked columns, one per item. Series stack bottom → top in the order given, separated by 2px
+ * surface gaps, with a 4px rounded cap. Hovering or focusing a column shows every series in it;
+ * the tallest and the last column carry their total on the cap. The legend is always shown.
+ */
+export function StackedColumnChart({ columns, series, format, height = 280, label, onSelect, selectHint }: {
+  columns: StackColumn[];
+  series: StackSeries[];
+  format: (n: number) => string;
+  height?: number;
+  label: string;
+  onSelect?: (id: string) => void;
+  selectHint?: string;
+}) {
+  const [active, setActive] = useState<number | null>(null);
+  const [plotRef, plotWidth] = useWidth<HTMLDivElement>();
+  const totals = columns.map((c) => series.reduce((sum, s) => sum + (c.values[s.key] ?? 0), 0));
+  const max = niceMax(Math.max(0, ...totals));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => t * max);
+  const padLeft = 44;
+  const capH = 20; // room above the tallest column for its total
+  const axisH = 38; // two-line labels under the columns
+  const plotH = height - capH - axisH;
+  const px = (v: number) => (max ? (v / max) * plotH : 0);
+  const band = columns.length ? plotWidth / columns.length : 0;
+  const tallest = totals.indexOf(Math.max(...totals));
+  const capped = new Set(band >= 44 ? [tallest, columns.length - 1] : []);
+  const labelEvery = band >= 64 ? 1 : Math.ceil(64 / Math.max(band, 1));
+  const legendTotals = series.map((s) => columns.reduce((sum, c) => sum + (c.values[s.key] ?? 0), 0));
+
+  return (
+    <figure aria-label={label} className="flex flex-col gap-4">
+      <div className="relative" style={{ height }}>
+        {/* gridlines and y ticks */}
+        {ticks.map((t) => (
+          <div key={t} className="absolute left-0 right-0 flex items-center" style={{ top: capH + plotH - px(t) }}>
+            <span className="tabular w-10 -translate-y-1/2 pr-2 text-right text-caption text-ink-3">{format(t)}</span>
+            <span className="h-px flex-1 -translate-y-1/2 bg-line" />
+          </div>
+        ))}
+        {/* columns: the whole band is the hit target, not just the painted bar */}
+        <div ref={plotRef} className="absolute right-0 flex" style={{ left: padLeft, top: capH, height: plotH }}>
+          {columns.map((c, i) => {
+            const shown = series.filter((s) => (c.values[s.key] ?? 0) > 0);
+            const barH = px(totals[i]);
+            // The 2px gaps come out of the segments, so the cap still lands on the column's value.
+            const fill = Math.max(0, barH - 2 * Math.max(0, shown.length - 1));
+            const isActive = active === i;
+            const align = i < columns.length / 3 ? "left-0" : i >= (columns.length * 2) / 3 ? "right-0" : "left-1/2 -translate-x-1/2";
+            const clickable = Boolean(onSelect) && !c.disabled;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                className={clsx("relative flex h-full flex-1 items-end justify-center outline-none", clickable ? "cursor-pointer" : "cursor-default")}
+                onPointerEnter={() => setActive(i)}
+                onPointerLeave={() => setActive(null)}
+                onFocus={() => setActive(i)}
+                onBlur={() => setActive(null)}
+                onClick={() => clickable && onSelect?.(c.id)}
+                aria-label={`${c.label}${c.sub ? `, ${c.sub}` : ""}: ${format(totals[i])} in total. ${shown.map((s) => `${s.label} ${format(c.values[s.key])}`).join(", ")}`}
+              >
+                <span className="flex w-full max-w-6 flex-col-reverse gap-[2px]">
+                  {shown.map((s, j) => (
+                    <motion.span
+                      key={s.key}
+                      className={clsx("block w-full transition-[filter]", j === shown.length - 1 && "rounded-t-[4px]", isActive && "brightness-125")}
+                      style={{ background: s.color }}
+                      initial={{ height: 0 }}
+                      animate={{ height: Math.max(1, totals[i] ? (c.values[s.key] / totals[i]) * fill : 0) }}
+                      transition={spring.smooth}
+                    />
+                  ))}
+                </span>
+                {capped.has(i) && !isActive && (
+                  <span className="tabular pointer-events-none absolute whitespace-nowrap text-caption text-ink-2" style={{ bottom: barH + 4 }}>
+                    {format(totals[i])}
+                  </span>
+                )}
+                {isActive && (
+                  <motion.span
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={spring.snappy}
+                    className={clsx("pointer-events-none absolute top-0 z-10 w-max min-w-44 max-w-72 rounded-control border border-line bg-overlay px-3 py-2 text-left shadow-float", align)}
+                  >
+                    <span className="tabular block text-small font-semibold text-ink">{format(totals[i])} tokens</span>
+                    <span className="block truncate text-caption text-ink-3">{c.label}{c.sub ? ` · ${c.sub}` : ""}</span>
+                    {c.note && <span className="block text-caption text-ink-3">{c.note}</span>}
+                    <span className="mt-2 flex flex-col gap-1">
+                      {[...shown].reverse().map((s) => (
+                        <span key={s.key} className="flex flex-col">
+                          <span className="flex items-center gap-2 text-caption">
+                            <span className="h-0.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} aria-hidden />
+                            <span className="tabular font-semibold text-ink">{format(c.values[s.key])}</span>
+                            <span className="truncate text-ink-2">{s.label}</span>
+                          </span>
+                          {c.breakdown?.[s.key]?.map((b) => (
+                            <span key={b.label} className="ml-[18px] flex gap-2 text-caption text-ink-3">
+                              <span className="tabular">{format(b.value)}</span>
+                              <span className="truncate">{b.label}</span>
+                            </span>
+                          ))}
+                        </span>
+                      ))}
+                    </span>
+                    {clickable && selectHint && <span className="mt-2 block text-caption text-ink-3">{selectHint}</span>}
+                  </motion.span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {/* column labels; the newest column always keeps its label */}
+        <div className="absolute bottom-0 right-0 flex" style={{ left: padLeft, height: axisH }}>
+          {columns.map((c, i) => (
+            <span
+              key={c.id}
+              className="flex min-w-0 flex-1 flex-col items-center pt-2"
+              style={{ visibility: (columns.length - 1 - i) % labelEvery === 0 ? "visible" : "hidden" }}
+            >
+              <span className="max-w-full truncate px-1 text-caption text-ink-2" title={c.label}>{c.label}</span>
+              {c.sub && <span className="max-w-full truncate px-1 text-[11px] leading-4 text-ink-3">{c.sub}</span>}
+            </span>
+          ))}
+        </div>
+      </div>
+      <ul className="flex flex-wrap gap-x-5 gap-y-1.5" aria-label="Legend">
+        {series.map((s, k) => (
+          <li key={s.key} className="flex items-center gap-2 text-small text-ink-2">
+            <span className="size-2.5 rounded-[2px]" style={{ background: s.color }} aria-hidden />
+            <span>{s.label}</span>
+            <span className="tabular text-ink-3">{format(legendTotals[k])}</span>
+          </li>
+        ))}
+      </ul>
     </figure>
   );
 }

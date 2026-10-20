@@ -41,6 +41,15 @@
   --color-viz-2: #199e70;
   --color-viz-3: #d95926;
   --color-viz-track: rgb(108 127 242 / 0.18);
+  /* categorical series, fixed order (slot 1 = viz-1); validated as a set on the panel surface */
+  --color-series-1: #6c7ff2;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #008300;
+  --color-series-other: #9aa1ae; /* folded tail ("Other sections") */
+  --color-series-base: #666d7d; /* recessive: tokens not tied to a series */
 
   /* glow — used in box-shadow and backdrop effects */
   --color-glow: rgb(123 140 255 / 0.2);
@@ -121,6 +130,15 @@
   --color-viz-2: #1baf7a;
   --color-viz-3: #eb6834;
   --color-viz-track: rgb(75 95 224 / 0.14);
+  /* slots 3–5 sit below 3:1 on white: charts using them ship a table view */
+  --color-series-1: #4b5fe0;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+  --color-series-5: #e87ba4;
+  --color-series-6: #008300;
+  --color-series-other: #6b7282;
+  --color-series-base: #8c93a0;
 
   --color-good: #0b8a0b;
   --color-warn: #c27c00;

@@ -58,6 +58,26 @@ export interface TokenUsage {
   workflows?: number;
 }
 
+/** One run's tokens split by section; `other_tokens` are calls not tied to a section. */
+export interface RunUsage {
+  workflow_id: string;
+  workflow_type: string | null;
+  title: string;
+  client_name: string;
+  saved: boolean;
+  started_at: string;
+  total_tokens: number;
+  cost_usd: number;
+  sections: { section_key: string; total_tokens: number; cost_usd: number }[];
+  other_tokens: number;
+  other_cost_usd: number;
+}
+
+export interface RunsUsage {
+  since: string;
+  runs: RunUsage[];
+}
+
 export interface TraceEntry {
   type: string;
   tool?: string;

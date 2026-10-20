@@ -5,6 +5,7 @@ import type {
   ProfileListItem,
   Readiness,
   RevisionResult,
+  RunsUsage,
   RunSummary,
   SearchHit,
   StoredRun,
@@ -160,6 +161,7 @@ export const api = {
   search: (body: { query: string; section_type?: string; industry?: string; top_k?: number; profile?: string }) =>
     request<{ results: SearchHit[] }>("/retrieval/search", { method: "POST", body: json(body) }),
   usageSummary: (days: number) => request<TokenUsage>(`/usage/summary?days=${days}`),
+  usageRuns: (days: number, limit = 12) => request<RunsUsage>(`/usage/runs?days=${days}&limit=${limit}`),
   workflowUsage: (id: string) => request<TokenUsage>(`/usage/workflows/${id}`),
   download: async (id: string, format: "pdf" | "md") => {
     const resp = await fetch(`${API_BASE}/workflow-runs/${id}/export?format=${format}`, { headers: authHeaders() });

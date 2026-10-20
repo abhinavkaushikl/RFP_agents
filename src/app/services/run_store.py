@@ -41,6 +41,17 @@ _USAGE_FIELDS = (
 )
 
 
+def _run_labels(run: WorkflowRun) -> tuple[str, str]:
+    """(title, client name) for a stored run, from its result, then its request payload."""
+    result = run.result_json or {}
+    request = result.get("request") or {}
+    payload = run.payload_json or {}
+    overview = result.get("client_overview") or {}
+    title = request.get("title") or payload.get("title") or overview.get("opportunity_name") or ""
+    client = request.get("client_name") or payload.get("client_name") or overview.get("client_name") or ""
+    return title, client
+
+
 def _uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
     if value is None:
         return None
@@ -237,19 +248,16 @@ class RunStore:
         out = []
         for run in self.db.execute(query).scalars():
             result = run.result_json or {}
-            request = result.get("request") or {}
-            payload = run.payload_json or {}
             totals = (result.get("token_usage") or {}).get("totals") or {}
-            overview = result.get("client_overview") or {}
+            title, client_name = _run_labels(run)
             out.append(
                 {
                     "workflow_id": str(run.id),
                     "workflow_type": run.workflow_type,
                     "status": result.get("status") or (run.status.value if run.status else None),
                     "profile": run.profile,
-                    "title": request.get("title") or payload.get("title") or overview.get("opportunity_name") or "",
-                    "client_name": request.get("client_name") or payload.get("client_name")
-                    or overview.get("client_name") or "",
+                    "title": title,
+                    "client_name": client_name,
                     "composite_score": (result.get("scores") or {}).get("composite_score"),
                     "section_count": len([s for s in result.get("sections") or [] if not s.get("error")]),
                     "total_tokens": totals.get("total_tokens", 0),
@@ -329,6 +337,59 @@ class RunStore:
         report["workflows"] = len({rec["workflow_id"] for rec in records if rec.get("workflow_id")})
         report["since"] = since.isoformat()
         return report
+
+    def usage_by_run(
+        self, days: int = 30, limit: int = 12, workflow_type: str | None = "proposal_generation",
+    ) -> dict[str, Any]:
+        """Tokens per run, split by section, for the most recent runs in the last N days.
+
+        Tokens from calls not tied to one section (planning, requirement extraction, scoring)
+        are reported per run as `other_tokens`.
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        query = select(LLMUsageEvent).where(
+            LLMUsageEvent.created_at >= since, LLMUsageEvent.workflow_id.is_not(None),
+        )
+        if workflow_type:
+            query = query.where(LLMUsageEvent.workflow_type == workflow_type)
+        by_run: dict[str, list[dict[str, Any]]] = {}
+        for row in self.db.execute(query).scalars():
+            rec = self._usage_dict(row)
+            by_run.setdefault(rec["workflow_id"], []).append(rec)
+
+        # Newest first, by when each run started spending.
+        recent = sorted(by_run.items(), key=lambda item: min(r["created_at"] for r in item[1]), reverse=True)
+        recent = recent[: max(1, min(limit, 50))]
+        ids = [rid for rid, _ in recent if _uuid(rid)]
+        runs_meta = {
+            str(run.id): run
+            for run in self.db.execute(select(WorkflowRun).where(WorkflowRun.id.in_([_uuid(i) for i in ids]))).scalars()
+        } if ids else {}
+
+        runs = []
+        for workflow_id, records in recent:
+            report = build_report(records, include_calls=False)
+            totals = report["totals"]
+            sections = [
+                {"section_key": s["section_key"], "total_tokens": s["total_tokens"], "cost_usd": s["cost_usd"]}
+                for s in report["by_section"]
+            ]
+            meta = runs_meta.get(workflow_id)
+            title, client_name = _run_labels(meta) if meta else ("", "")
+            runs.append({
+                "workflow_id": workflow_id,
+                "workflow_type": records[0].get("workflow_type"),
+                "title": title,
+                "client_name": client_name,
+                "saved": meta is not None,
+                "started_at": min(r["created_at"] for r in records),
+                "total_tokens": totals["total_tokens"],
+                "cost_usd": totals["cost_usd"],
+                "sections": sections,
+                "other_tokens": totals["total_tokens"] - sum(s["total_tokens"] for s in sections),
+                "other_cost_usd": round(totals["cost_usd"] - sum(s["cost_usd"] for s in sections), 6),
+            })
+        return {"since": since.isoformat(), "runs": runs}
 
     @staticmethod
     def _usage_dict(row: LLMUsageEvent) -> dict[str, Any]:
