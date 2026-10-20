@@ -120,7 +120,7 @@ def _needs_code(email: str) -> dict:
 
 
 @router.post("/signup")
-def signup(body: SignupRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+def signup(body: SignupRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
     if not settings.auth_allow_signup:
         raise UnauthorizedError("Sign-up is disabled. Ask an administrator for an account.")
@@ -129,6 +129,19 @@ def signup(body: SignupRequest, request: Request, db: Session = Depends(get_db))
     if len(body.password) < 8:
         raise InvalidRequestError("Use at least 8 characters for the password.")
     user = db.scalar(select(User).where(User.email == email))
+    if not settings.email_verification_required:
+        # No email service: accounts work straight away, so an existing address can't be re-claimed.
+        if user is not None:
+            raise ConflictError("An account with this email already exists. Sign in instead.")
+        user = User(id=uuid.uuid4(), email=email, name=body.name.strip(), password_hash=hash_password(body.password))
+        db.add(user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise ConflictError("An account with this email already exists.") from None
+        _set_cookie(response, user)
+        return {"user": _public(user)}
     if user is not None and user.email_verified_at is not None:
         raise ConflictError("An account with this email already exists.")
     if user is None:
@@ -198,7 +211,7 @@ def login(body: Credentials, request: Request, response: Response, db: Session =
     ok = verify_password(body.password, user.password_hash if user else DUMMY_HASH)
     if not user or not ok:
         raise UnauthorizedError("Incorrect email or password.")
-    if user.email_verified_at is None:
+    if user.email_verified_at is None and get_settings().email_verification_required:
         try:
             _send_new_code(db, user, respect_cooldown=True)
         except RateLimitedError:

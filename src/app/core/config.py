@@ -65,7 +65,9 @@ class Settings(BaseSettings):
     auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
     auth_session_ttl_s: int = Field(default=7 * 24 * 3600, ge=60)
     auth_allow_signup: bool = True
-    # Email confirmation (one-time code sent at sign-up and for unconfirmed sign-ins)
+    # Email confirmation (one-time code sent at sign-up and for unconfirmed sign-ins).
+    # Turn off only while no email service is set up: accounts then work without proving the address.
+    email_verification_required: bool = True
     mail_provider: Literal["log", "smtp", "resend"] = Field(
         default="log", description="log = print the code in the server log (local dev only)"
     )
