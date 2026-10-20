@@ -15,7 +15,7 @@ SECTION = {"section_key": "executive_summary", "title": "Executive Summary", "dr
 
 
 @pytest.fixture
-def world(monkeypatch):
+def world(monkeypatch, sent_codes):
     from app.api.deps import get_db
     from app.bootstrap import create_app
     from app.core.config import get_settings
@@ -26,7 +26,7 @@ def world(monkeypatch):
     monkeypatch.setenv("RFP_ADMIN_EMAILS", "boss@example.com")
     get_settings.cache_clear()
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
-    for table in (m.User, m.WorkflowRun, m.GeneratedSection, m.GeneratedSectionRevision, m.LLMUsageEvent, m.SectionType):
+    for table in (m.User, m.EmailOtp, m.WorkflowRun, m.GeneratedSection, m.GeneratedSectionRevision, m.LLMUsageEvent, m.SectionType):
         table.__table__.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False)
 
@@ -39,6 +39,7 @@ def world(monkeypatch):
 
     app = create_app()
     app.dependency_overrides[get_db] = override
+    app.state.sent = sent_codes
     return app, Session
 
 
@@ -48,7 +49,9 @@ def _client(app):
 
 def _signup(app, email):
     c = _client(app)
-    r = c.post("/api/auth/signup", json={"email": email, "password": "correct horse", "name": email})
+    assert c.post("/api/auth/signup", json={"email": email, "password": "correct horse", "name": email}).status_code == 200
+    code = [code for to, code in c.app.state.sent if to == email][-1]
+    r = c.post("/api/auth/verify", json={"email": email, "code": code})
     assert r.status_code == 200, r.text
     return c, uuid.UUID(r.json()["user"]["id"])
 

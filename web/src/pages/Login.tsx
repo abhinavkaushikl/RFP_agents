@@ -1,6 +1,6 @@
-import { ArrowRight, Check, Eye, EyeOff, Loader2, ShieldCheck, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2, MailCheck, ShieldCheck, Sparkles, TrendingUp } from "lucide-react";
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -192,7 +192,12 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const celebrating = useRef(false);
-  const { ready, user, signupEnabled, signIn, signUp } = useAuth();
+  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, resendCode } = useAuth();
+  // Set once an emailed code is on its way; the page then asks for it instead of the form.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
   const from = (useLocation().state as { from?: string } | null)?.from ?? "/";
   const reduce = useReducedMotion();
   const mx = useMotionValue(0.5);
@@ -203,6 +208,19 @@ export default function Login() {
   const rotX = useTransform(sy, [0, 1], [5, -5]);
   const spot = useMotionTemplate`radial-gradient(520px circle at ${useTransform(sx, [0, 1], ["0%", "100%"])} ${useTransform(sy, [0, 1], ["0%", "100%"])}, rgb(154 167 255 / 0.16), transparent 60%)`;
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const fail = (err: unknown) => setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+
+  function finish() {
+    setDone(true);
+    setTimeout(() => navigate(from, { replace: true }), 550);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -210,15 +228,58 @@ export default function Login() {
     setError(null);
     celebrating.current = true;
     try {
-      if (mode === "signup") await signUp(name.trim(), email.trim(), password);
-      else await signIn(email.trim(), password);
-      setDone(true);
-      setTimeout(() => navigate(from, { replace: true }), 550);
+      const needsCode = mode === "signup" ? await signUp(name.trim(), email.trim(), password) : await signIn(email.trim(), password);
+      if (needsCode) {
+        // Not signed in yet: the address has to be confirmed first.
+        celebrating.current = false;
+        setPendingEmail(needsCode);
+        setCode("");
+        setCooldown(45);
+        setBusy(false);
+        return;
+      }
+      finish();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+      fail(err);
       celebrating.current = false;
       setBusy(false);
     }
+  }
+
+  async function confirm(value: string) {
+    if (busy || !pendingEmail) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    celebrating.current = true;
+    try {
+      await verifyEmail(pendingEmail, value);
+      finish();
+    } catch (err) {
+      fail(err);
+      setCode("");
+      celebrating.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    if (!pendingEmail || cooldown > 0) return;
+    setError(null);
+    try {
+      await resendCode(pendingEmail);
+      setNotice("A new code is on its way.");
+      setCooldown(45);
+    } catch (err) {
+      fail(err);
+    }
+  }
+
+  function leaveCodeStep() {
+    setPendingEmail(null);
+    setCode("");
+    setError(null);
+    setNotice(null);
   }
 
   const field =
@@ -251,6 +312,57 @@ export default function Login() {
             Sign in and turn any request for proposal into a winning response.
           </motion.p>
 
+          {pendingEmail ? (
+            <motion.form
+              key="code"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={spring.smooth}
+              onSubmit={(e) => { e.preventDefault(); if (code.length === 6) void confirm(code); }}
+              className="mt-8 space-y-4 rounded-[24px] border border-white/10 bg-white/[0.035] p-6 shadow-[0_30px_80px_-30px_rgb(0_0_0/0.7),inset_0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-md"
+            >
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-ion-soft text-ion-strong"><MailCheck className="size-5" /></span>
+                <div>
+                  <h2 className="text-lead font-semibold">Check your email</h2>
+                  <p className="text-small text-ink-2">We sent a 6-digit code to <span className="font-medium text-ink">{pendingEmail}</span>. It expires in 10 minutes.</p>
+                </div>
+              </div>
+              <input
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]*"
+                maxLength={6}
+                aria-label="6-digit code"
+                value={code}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
+                  setCode(digits);
+                  if (digits.length === 6) void confirm(digits);
+                }}
+                placeholder="000000"
+                className="h-14 w-full rounded-[12px] border border-line-strong bg-fill text-center font-mono text-[1.6rem] tracking-[0.5em] text-ink outline-none transition placeholder:text-ink-3/50 focus:border-ion focus:bg-wash focus:shadow-[0_0_0_4px_var(--color-ion-soft)]"
+              />
+              {error && <p role="alert" className="rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-small text-bad-text">{error}</p>}
+              {notice && !error && <p role="status" className="text-small text-ink-2">{notice}</p>}
+              <motion.button
+                type="submit"
+                disabled={code.length !== 6 || busy}
+                whileTap={{ scale: 0.97 }}
+                transition={spring.snappy}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-gradient-to-b from-[#8c9bff] to-[#6577f5] text-body font-semibold text-on-ion shadow-[0_10px_28px_-8px_var(--color-glow-strong),inset_0_1px_0_rgb(255_255_255/0.35)] disabled:opacity-50"
+              >
+                {done ? <><Check className="size-4.5" /> Confirmed</> : busy ? <Loader2 className="size-4.5 animate-spin" /> : <>Confirm <ArrowRight className="size-4.5" /></>}
+              </motion.button>
+              <div className="flex items-center justify-between text-small">
+                <button type="button" onClick={leaveCodeStep} className="inline-flex items-center gap-1 text-ink-3 hover:text-ink"><ArrowLeft className="size-3.5" /> Use a different email</button>
+                <button type="button" onClick={resend} disabled={cooldown > 0} className="text-ion-strong hover:underline disabled:text-ink-3 disabled:no-underline">
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+                </button>
+              </div>
+            </motion.form>
+          ) : (
           <motion.form onSubmit={submit} initial="hide" animate="show" variants={{ show: { transition: { staggerChildren: 0.07, delayChildren: 0.2 } } }} className="mt-8 space-y-3.5 rounded-[24px] border border-white/10 bg-white/[0.035] p-6 shadow-[0_30px_80px_-30px_rgb(0_0_0/0.7),inset_0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-xl">
             {[
               ...(mode === "signup"
@@ -302,6 +414,7 @@ export default function Login() {
               </motion.div>
             ))}
           </motion.form>
+          )}
         </div>
 
         <p className="flex items-center gap-1.5 text-caption text-ink-3">

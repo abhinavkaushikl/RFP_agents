@@ -65,6 +65,15 @@ def _sign(body: str) -> str:
     return _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
 
 
+def new_code() -> str:
+    return f"{secrets.randbelow(10**6):06d}"
+
+
+def hash_code(user_id: str, code: str) -> str:
+    """Keyed hash of a one-time code, bound to the user it was issued for."""
+    return _sign(f"otp:{user_id}:{code}")
+
+
 def issue_session(user_id: str, now: float | None = None) -> str:
     expires = int((now if now is not None else time.time()) + get_settings().auth_session_ttl_s)
     body = f"{user_id}.{expires}"

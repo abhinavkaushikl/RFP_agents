@@ -55,3 +55,13 @@ def orchestrator(llm):
     retrieval = FakeRetrievalService()
     agents = build_agent_registry(retrieval, llm, embedding_service=FakeEmbeddingService())
     return ProposalWorkflowOrchestrator(retrieval_service=retrieval, llm_service=llm, agent_registry=agents)
+
+
+@pytest.fixture
+def sent_codes(monkeypatch):
+    """Collects (email, code) instead of sending mail; the resend cooldown is off unless a test sets it."""
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr("app.api.routers.auth.send_code", lambda to, code: sent.append((to, code)))
+    monkeypatch.setenv("RFP_OTP_RESEND_COOLDOWN_S", "0")
+    get_settings.cache_clear()
+    return sent

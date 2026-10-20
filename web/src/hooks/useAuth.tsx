@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { api, ApiError, type AuthState, type AuthUser } from "@/lib/api";
+import { api, ApiError, type AuthState, type AuthUser, type SignInResult } from "@/lib/api";
 
 interface AuthContextValue {
   /** false until the first /auth/me answer arrives */
@@ -9,8 +9,11 @@ interface AuthContextValue {
   user: AuthUser | null;
   authRequired: boolean;
   signupEnabled: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
+  /** Resolves to the address that was sent a code when the account still needs confirming, else undefined. */
+  signIn: (email: string, password: string) => Promise<string | undefined>;
+  signUp: (name: string, email: string, password: string) => Promise<string | undefined>;
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  resendCode: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -44,21 +47,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
+  const settle = useCallback(
+    (result: SignInResult): string | undefined => {
+      if ("user" in result) {
+        adopt(result.user);
+        return undefined;
+      }
+      return result.email;
+    },
+    [adopt],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       ready,
       user: state.user,
       authRequired: state.auth_required,
       signupEnabled: state.signup_enabled,
-      signIn: async (email, password) => adopt((await api.login(email, password)).user),
-      signUp: async (name, email, password) => adopt((await api.signup(name, email, password)).user),
+      signIn: async (email, password) => settle(await api.login(email, password)),
+      signUp: async (name, email, password) => settle(await api.signup(name, email, password)),
+      verifyEmail: async (email, code) => adopt((await api.verifyEmail(email, code)).user),
+      resendCode: async (email) => {
+        await api.resendCode(email);
+      },
       signOut: async () => {
         await api.logout().catch(() => undefined);
         queryClient.clear();
         setState((s) => ({ ...s, user: null }));
       },
     }),
-    [ready, state, adopt, queryClient],
+    [ready, state, adopt, settle, queryClient],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

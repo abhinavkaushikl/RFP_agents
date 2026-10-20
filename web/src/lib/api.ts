@@ -110,6 +110,9 @@ export interface AuthUser {
   name: string;
 }
 
+/** Either signed in, or the account still needs the emailed code. */
+export type SignInResult = { user: AuthUser } | { verification_required: true; email: string };
+
 export interface AuthState {
   user: AuthUser | null;
   auth_required: boolean;
@@ -119,9 +122,12 @@ export interface AuthState {
 export const api = {
   me: () => request<AuthState>("/auth/me"),
   login: (email: string, password: string) =>
-    request<{ user: AuthUser }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+    request<SignInResult>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   signup: (name: string, email: string, password: string) =>
-    request<{ user: AuthUser }>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
+    request<SignInResult>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
+  verifyEmail: (email: string, code: string) =>
+    request<{ user: AuthUser }>("/auth/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+  resendCode: (email: string) => request<{ ok: boolean }>("/auth/resend", { method: "POST", body: JSON.stringify({ email }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   ready: async (): Promise<Readiness> => {
     const resp = await fetch(`${API_BASE}/health/ready`, { headers: authHeaders() }).catch(() => null);

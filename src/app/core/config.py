@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
     auth_session_ttl_s: int = Field(default=7 * 24 * 3600, ge=60)
     auth_allow_signup: bool = True
+    # Email confirmation (one-time code sent at sign-up and for unconfirmed sign-ins)
+    mail_provider: Literal["log", "smtp", "resend"] = Field(
+        default="log", description="log = print the code in the server log (local dev only)"
+    )
+    mail_from: str = Field(default="", description='e.g. "Proposal Builder <no-reply@yourdomain.com>"')
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: SecretStr | None = None
+    resend_api_key: SecretStr | None = None
+    otp_ttl_s: int = Field(default=600, ge=60)
+    otp_max_attempts: int = Field(default=5, ge=1)
+    otp_resend_cooldown_s: int = Field(default=45, ge=0)
     admin_emails: str = Field(default="", description="Comma-separated emails that can see every user's runs")
     auth_login_attempts_per_minute: int = Field(default=10, ge=0, description="Per client IP; 0 disables")
     cors_origins: str = "http://localhost:5173,http://localhost:8501"
