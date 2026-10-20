@@ -210,3 +210,22 @@ def test_production_refuses_to_log_codes():
     finally:
         del os.environ["RFP_ENVIRONMENT"]
         get_settings.cache_clear()
+
+
+def test_failed_send_does_not_trigger_the_resend_cooldown(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.services.mailer import MailDeliveryError
+
+    monkeypatch.setenv("RFP_OTP_RESEND_COOLDOWN_S", "60")
+    get_settings.cache_clear()
+    calls = {"n": 0}
+
+    def flaky(to, code):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise MailDeliveryError("smtp down")
+        client.sent.append((to, code))
+
+    monkeypatch.setattr("app.api.routers.auth.send_code", flaky)
+    assert client.post("/api/auth/signup", json=CREDS).status_code == 502
+    assert client.post("/api/auth/signup", json=CREDS).status_code == 200  # not 429

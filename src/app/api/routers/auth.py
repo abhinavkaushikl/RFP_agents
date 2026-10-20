@@ -106,7 +106,13 @@ def _send_new_code(db: Session, user: User, *, respect_cooldown: bool) -> None:
         expires_at=_now() + timedelta(seconds=settings.otp_ttl_s),
     ))
     db.commit()
-    send_code(user.email, code)
+    try:
+        send_code(user.email, code)
+    except AppError:
+        # Nothing reached them: drop the code so the retry isn't held back by the resend cooldown.
+        db.execute(delete(EmailOtp).where(EmailOtp.user_id == user.id))
+        db.commit()
+        raise
 
 
 def _needs_code(email: str) -> dict:
