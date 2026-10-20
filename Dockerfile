@@ -22,7 +22,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 # CPU-only torch keeps the image small; sentence-transformers needs it for embeddings.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install .
+    && pip install '.[local]'
 
 # Bake the embedding model into the image so containers start without network access.
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"

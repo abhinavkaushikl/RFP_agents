@@ -46,7 +46,7 @@ Move an agent between tiers with `RFP_LLM_ROUTE_OVERRIDES='{"product_fit": "fast
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[ui,dev]"
+pip install -e ".[local,ui,dev]"
 cp .env.example .env            # set RFP_GROQ_API_KEY (a key from your Groq organization)
 
 createdb proposal_platform      # Postgres 14+ with the pgvector extension available

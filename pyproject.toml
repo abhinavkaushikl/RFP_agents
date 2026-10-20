@@ -26,12 +26,16 @@ dependencies = [
   "redis>=5.0.8",
   "reportlab>=4.0.0",
   "requests>=2.31.0",
-  "sentence-transformers>=2.7.0",
   "SQLAlchemy>=2.0.36",
   "uvicorn[standard]>=0.30.6",
 ]
 
 [project.optional-dependencies]
+# In-process embeddings (pulls in torch, ~GBs). Docker and local dev install this; Vercel does not,
+# and uses RFP_EMBEDDING_PROVIDER=remote instead.
+local = [
+  "sentence-transformers>=2.7.0",
+]
 # Legacy Streamlit UI (ui/). The default UI is the web app in web/, served by the API.
 ui = [
   "pandas>=2.0.0",
