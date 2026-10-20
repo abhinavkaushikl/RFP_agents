@@ -6,8 +6,10 @@ every `_RETRY_AFTER_S` seconds.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
+from urllib.parse import urlparse
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -33,6 +35,11 @@ def set_redis_client(client) -> None:
     _client = None
 
 
+def _is_local(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
 def get_redis():
     """Return a connected Redis client, or None when Redis is unavailable."""
     global _client, _last_failure
@@ -48,6 +55,10 @@ def get_redis():
         if _client is not None:
             return _client
         settings = get_settings()
+        if os.environ.get("VERCEL") and _is_local(settings.redis_url):
+            # A serverless function has no Redis on localhost; trying costs ~2 s every retry window.
+            _last_failure = time.monotonic()
+            return None
         try:
             client = redis_lib.Redis.from_url(
                 settings.redis_url,

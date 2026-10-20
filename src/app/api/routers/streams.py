@@ -105,7 +105,8 @@ def stream_run(factory: OrchestratorFactory, run: Callable[[ProposalWorkflowOrch
     return StreamingResponse(
         body(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        # No "Connection" header: it is hop-by-hop and invalid on the HTTP/2 connections Vercel serves.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

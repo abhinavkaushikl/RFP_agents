@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { streamPost } from "@/lib/sse";
 import type { TraceEntry } from "@/lib/types";
 
@@ -38,6 +38,40 @@ export interface RunState<T> {
 
 const initial = <T,>(): RunState<T> => ({ phase: "idle", steps: [], sections: [], decisions: [], tokens: 0 });
 
+// How long to keep waiting for a run whose live connection dropped; above the API's 300 s limit.
+const RECOVER_FOR_MS = 6 * 60_000;
+const RECOVER_EVERY_MS = 4_000;
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+}
+
+/**
+ * The server keeps running a workflow after the browser's stream drops (a proxy or network hiccup),
+ * and saves it when it finishes. Poll for that saved run; undefined when it never shows up.
+ */
+async function recoverRun<T>(workflowId: string, signal: AbortSignal): Promise<T | undefined> {
+  const deadline = Date.now() + RECOVER_FOR_MS;
+  while (Date.now() < deadline) {
+    await sleep(RECOVER_EVERY_MS, signal);
+    try {
+      const run = await api.run<T>(workflowId);
+      if (run.status === "completed") return run.result;
+      if (run.status === "failed") return undefined;
+    } catch (err) {
+      // 404 until the run is saved; other errors are as likely to be transient as the drop was.
+      if (err instanceof ApiError && err.status === 401) return undefined;
+    }
+  }
+  return undefined;
+}
+
 function startNext(steps: RunStep[]): RunStep[] {
   const next = steps.findIndex((s) => s.status === "pending");
   if (next < 0 || steps.some((s) => s.status === "running")) return steps;
@@ -60,12 +94,14 @@ export function useRunStream<T>() {
     abort.current = controller;
     setState({ ...initial<T>(), phase: "running", startedAt: Date.now() });
     let final: T | undefined;
+    let workflowId: string | undefined;
     try {
       await streamPost(
         path,
         body,
         ({ event, data }) => {
           if (event === "result") final = data as T;
+          if (!workflowId && typeof data.workflow_id === "string") workflowId = data.workflow_id;
           setState((prev) => {
             if (event === "trace") {
               const entry = data.entry as TraceEntry;
@@ -139,6 +175,24 @@ export function useRunStream<T>() {
       );
     } catch (err) {
       if ((err as Error).name === "AbortError") return undefined;
+      // The stream broke mid-run (not an API error response): the run itself is still going.
+      if (workflowId && !(err instanceof ApiError)) {
+        try {
+          const recovered = await recoverRun<T>(workflowId, controller.signal);
+          if (recovered) {
+            setState((prev) => ({
+              ...prev,
+              phase: "done",
+              result: recovered,
+              steps: prev.steps.map((s) => (s.status === "done" ? s : { ...s, status: "done" })),
+              sections: prev.sections.map((s) => (s.status === "done" || s.status === "failed" ? s : { ...s, status: "done" })),
+            }));
+            return recovered;
+          }
+        } catch (pollErr) {
+          if ((pollErr as Error).name === "AbortError") return undefined;
+        }
+      }
       const apiErr = err instanceof ApiError ? err : new ApiError(String((err as Error).message), 0);
       setState((prev) => ({ ...prev, phase: "error", error: apiErr }));
       return undefined;
