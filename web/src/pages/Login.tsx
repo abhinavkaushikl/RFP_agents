@@ -125,7 +125,7 @@ function ProposalCard() {
   const reduce = useReducedMotion();
   const widths = ["86%", "64%", "78%", "48%"];
   return (
-    <div className="w-[236px] rounded-[18px] border border-white/12 bg-white/[0.07] p-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.6),inset_0_1px_0_rgb(255_255_255/0.12)] backdrop-blur-xl">
+    <div className="w-[236px] rounded-[18px] border border-white/12 bg-white/[0.07] p-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.6),inset_0_1px_0_rgb(255_255_255/0.12)] backdrop-blur-md">
       <div className="flex items-center gap-2.5">
         <span className="grid size-8 place-items-center rounded-[10px] bg-gradient-to-br from-[#7b8cff] to-[#c06bff]"><Sparkles className="size-4 text-white" /></span>
         <div className="leading-tight">
@@ -147,7 +147,7 @@ function ProposalCard() {
 
 function StatCard() {
   return (
-    <div className="flex w-[196px] items-center gap-3 rounded-[18px] border border-white/12 bg-white/[0.07] p-3.5 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.6),inset_0_1px_0_rgb(255_255_255/0.12)] backdrop-blur-xl">
+    <div className="flex w-[196px] items-center gap-3 rounded-[18px] border border-white/12 bg-white/[0.07] p-3.5 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.6),inset_0_1px_0_rgb(255_255_255/0.12)] backdrop-blur-md">
       <span className="grid size-10 place-items-center rounded-[12px] bg-[#2fbf71]/20 text-[#5be39a]"><TrendingUp className="size-5" /></span>
       <div className="leading-tight">
         <p className="text-title font-semibold tracking-tight text-white">3.2× faster</p>
@@ -159,14 +159,21 @@ function StatCard() {
 
 function Backdrop() {
   const reduce = useReducedMotion();
-  const blob = (cls: string, x: number[], y: number[], dur: number) => (
-    <motion.div aria-hidden className={`absolute rounded-full blur-3xl ${cls}`} animate={reduce ? undefined : { x, y }} transition={{ duration: dur, repeat: Infinity, repeatType: "mirror", ease: "easeInOut" }} />
+  // Soft blobs are radial gradients, not blurred circles: a blur filter on a moving layer is re-run every frame.
+  const blob = (cls: string, color: string, x: number[], y: number[], dur: number) => (
+    <motion.div
+      aria-hidden
+      className={`absolute rounded-full ${cls}`}
+      style={{ background: `radial-gradient(closest-side, ${color} 35%, transparent)` }}
+      animate={reduce ? undefined : { x, y }}
+      transition={{ duration: dur, repeat: Infinity, repeatType: "mirror", ease: "easeInOut" }}
+    />
   );
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {blob("-left-24 top-0 size-[460px] bg-[#5b6bff]/45", [0, 80, -20], [0, 60, 20], 14)}
-      {blob("right-0 top-1/3 size-[400px] bg-[#c06bff]/32", [0, -90, 20], [0, -40, 50], 17)}
-      {blob("bottom-0 left-1/3 size-[360px] bg-[#2fb5ff]/30", [0, 60, -40], [0, -60, 0], 19)}
+      {blob("-left-32 -top-8 size-[560px]", "rgb(91 107 255 / 0.45)", [0, 80, -20], [0, 60, 20], 14)}
+      {blob("-right-12 top-1/4 size-[500px]", "rgb(192 107 255 / 0.32)", [0, -90, 20], [0, -40, 50], 17)}
+      {blob("-bottom-12 left-1/4 size-[460px]", "rgb(47 181 255 / 0.3)", [0, 60, -40], [0, -60, 0], 19)}
       <div aria-hidden className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "radial-gradient(#fff 1px, transparent 1px)", backgroundSize: "26px 26px", maskImage: "radial-gradient(ellipse at center, #000 30%, transparent 75%)" }} />
       {/* film grain keeps the gradients from banding */}
       <div aria-hidden className="absolute inset-0 opacity-[0.06] mix-blend-overlay" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")" }} />
@@ -224,7 +231,7 @@ export default function Login() {
   return (
     <main className="grid min-h-dvh bg-canvas text-ink lg:grid-cols-[minmax(420px,5fr)_7fr]">
       <section className="relative z-10 flex flex-col justify-between overflow-hidden px-6 py-8 sm:px-14">
-        <div aria-hidden className="pointer-events-none absolute -left-32 -top-32 size-[420px] rounded-full bg-[#5b6bff]/20 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -left-40 -top-40 size-[540px] rounded-full" style={{ background: "radial-gradient(closest-side, rgb(91 107 255 / 0.2) 35%, transparent)" }} />
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={spring.smooth} className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-[9px] bg-gradient-to-br from-[#7b8cff] to-[#4b57d6] shadow-[0_6px_18px_-4px_var(--color-glow-strong)]">
             <svg viewBox="0 0 24 24" className="size-4.5" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

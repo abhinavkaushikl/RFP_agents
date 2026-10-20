@@ -158,7 +158,9 @@ function Sidebar({ expanded, onToggle, onNavigate, mobile }: {
       transition={spring.smooth}
       className={clsx(
         "flex h-full shrink-0 flex-col border-r border-line",
-        "bg-panel/80 backdrop-blur-2xl",
+        // Mostly opaque with a light blur: the starfield animates underneath, and a 40 px blur
+        // recomputed on every frame was the costliest thing on screen.
+        "bg-panel/90 backdrop-blur-md",
         mobile && "w-[236px]",
       )}
       aria-label="Main navigation"
@@ -387,7 +389,7 @@ export function AppShell() {
         </AnimatePresence>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/75 px-4 backdrop-blur-2xl shadow-[0_1px_12px_-4px_rgb(0_0_0/0.2)] sm:px-6">
+          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/85 px-4 backdrop-blur-md shadow-[0_1px_12px_-4px_rgb(0_0_0/0.2)] sm:px-6">
             {isMobile && (
               <button type="button" onClick={() => setDrawer(true)} aria-label="Open navigation" className="-ml-1 rounded-control p-1.5 text-ink-2 hover:text-ink">
                 <Menu className="size-5" />
