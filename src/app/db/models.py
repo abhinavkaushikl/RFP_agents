@@ -413,6 +413,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # "member" sees only their own work; "admin" can also see everyone's (see core/access.py).
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member", server_default="member")
     # Set when the person proves they own the address by entering the emailed code.
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = now_column()
@@ -429,3 +431,21 @@ class EmailOtp(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = now_column()
+
+
+class ExistingSolution(Base):
+    """A solution a person already has (a product, service or past project), kept in their own library."""
+
+    __tablename__ = "existing_solutions"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_existing_solutions_owner_name"),)
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    capabilities: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    url: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = now_column()
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

@@ -25,7 +25,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_scope(request: Request, db: Session = Depends(get_db)) -> AccessScope:
-    """Signed-in members are restricted to their own runs; admins, API keys and no-auth use are not."""
+    """Members are restricted to their own work; admins, API keys and no-auth use are not."""
     user_id = read_session(request.cookies.get(SESSION_COOKIE))
     if not user_id:
         return UNRESTRICTED
@@ -33,13 +33,13 @@ def get_scope(request: Request, db: Session = Depends(get_db)) -> AccessScope:
         owner = uuid.UUID(user_id)
     except ValueError:
         return UNRESTRICTED
-    admins = get_settings().admin_email_list
-    if admins:
-        from app.db.models import User
+    from app.db.models import User
 
-        user = db.get(User, owner)
-        if user is not None and user.email.lower() in admins:
-            return AccessScope(owner_id=owner, restricted=False)
+    user = db.get(User, owner)
+    if user is None:
+        return AccessScope(owner_id=owner, restricted=True)
+    if user.role == "admin" or user.email.lower() in get_settings().admin_email_list:
+        return AccessScope(owner_id=owner, restricted=False, role="admin")
     return AccessScope(owner_id=owner, restricted=True)
 
 

@@ -11,6 +11,7 @@ import {
   House,
   Library,
   Menu,
+  Package,
   MessagesSquare,
   Radar,
   ScanSearch,
@@ -52,7 +53,10 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   },
   {
     group: "Library",
-    items: [{ to: "/library", label: "Knowledge base", icon: <Library className="size-[18px]" /> }],
+    items: [
+      { to: "/solutions", label: "Existing solutions", icon: <Package className="size-[18px]" /> },
+      { to: "/library", label: "Knowledge base", icon: <Library className="size-[18px]" /> },
+    ],
   },
 ];
 
@@ -69,6 +73,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/deals/, "Deal analysis"],
   [/^\/bid-check/, "Bid check"],
   [/^\/market/, "Market scan"],
+  [/^\/solutions/, "Existing solutions"],
   [/^\/library/, "Knowledge base"],
   [/^\/usage/, "Usage"],
   [/^\/settings/, "Settings"],

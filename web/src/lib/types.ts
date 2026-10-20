@@ -373,3 +373,22 @@ export interface IngestResult {
   skipped: { index?: number; id?: string; reason: string }[];
   files: { file_name: string; ok: boolean; sections?: string[]; error?: string }[];
 }
+
+export type SolutionStatus = "active" | "planned" | "retired";
+
+export interface Solution {
+  id: string;
+  name: string;
+  category: string | null;
+  status: SolutionStatus;
+  description: string;
+  capabilities: string[];
+  url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  mine: boolean;
+  /** Only sent to admins. */
+  owner_email?: string;
+}
+
+export type SolutionInput = Pick<Solution, "name" | "category" | "status" | "description" | "capabilities" | "url">;

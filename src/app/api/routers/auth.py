@@ -44,7 +44,8 @@ class SignupRequest(Credentials):
 
 
 def _public(user: User) -> dict:
-    return {"id": str(user.id), "email": user.email, "name": user.name}
+    admin = user.role == "admin" or user.email.lower() in get_settings().admin_email_list
+    return {"id": str(user.id), "email": user.email, "name": user.name, "role": "admin" if admin else "member"}
 
 
 def _set_cookie(response: Response, user: User) -> None:

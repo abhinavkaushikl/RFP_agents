@@ -14,6 +14,7 @@ from app.api.routers.ingestion import router as ingestion_router
 from app.api.routers.profiles import router as profiles_router
 from app.api.routers.retrieval import router as retrieval_router
 from app.api.routers.streams import router as streams_router
+from app.api.routers.solutions import router as solutions_router
 from app.api.routers.usage import router as usage_router
 from app.api.routers.workflows import router as workflows_router
 from app.core.config import PROJECT_ROOT, get_settings
@@ -76,7 +77,7 @@ def create_app() -> FastAPI:
 
     register_error_handlers(app)
     for router in (auth_router, health_router, profiles_router, ingestion_router, retrieval_router, streams_router,
-                   workflows_router, usage_router):
+                   workflows_router, usage_router, solutions_router):
         app.include_router(router, prefix=settings.api_prefix)
     _mount_web_app(app, settings.api_prefix)
 

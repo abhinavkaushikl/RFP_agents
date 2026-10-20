@@ -24,6 +24,7 @@ const pageLoaders = {
   BidCheck: () => import("@/pages/BidCheck"),
   MarketScan: () => import("@/pages/MarketScan"),
   KnowledgeBase: () => import("@/pages/KnowledgeBase"),
+  Solutions: () => import("@/pages/Solutions"),
   Usage: () => import("@/pages/Usage"),
   Settings: () => import("@/pages/Settings"),
 };
@@ -35,6 +36,7 @@ const DealAnalysis = lazy(pageLoaders.DealAnalysis);
 const BidCheck = lazy(pageLoaders.BidCheck);
 const MarketScan = lazy(pageLoaders.MarketScan);
 const KnowledgeBase = lazy(pageLoaders.KnowledgeBase);
+const Solutions = lazy(pageLoaders.Solutions);
 const Usage = lazy(pageLoaders.Usage);
 const Settings = lazy(pageLoaders.Settings);
 
@@ -93,6 +95,7 @@ const router = createBrowserRouter([
           { path: "bid-check", element: page(BidCheck) },
           { path: "market", element: page(MarketScan) },
           { path: "library", element: page(KnowledgeBase) },
+          { path: "solutions", element: page(Solutions) },
           { path: "usage", element: page(Usage) },
           { path: "settings", element: page(Settings) },
           { path: "*", element: page(NotFound) },

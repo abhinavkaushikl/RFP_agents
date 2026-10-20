@@ -15,6 +15,11 @@ class AccessScope:
 
     owner_id: uuid.UUID | None = None
     restricted: bool = False
+    role: str = "member"
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
 
     def allows(self, run_owner_id: uuid.UUID | None) -> bool:
         return not self.restricted or (run_owner_id is not None and run_owner_id == self.owner_id)

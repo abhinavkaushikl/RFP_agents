@@ -8,6 +8,8 @@ import type {
   RunsUsage,
   RunSummary,
   SearchHit,
+  Solution,
+  SolutionInput,
   StoredRun,
   TokenUsage,
 } from "./types";
@@ -97,6 +99,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     throw err;
   }
+  if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
 }
 
@@ -108,6 +111,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  role?: "member" | "admin";
 }
 
 /** Either signed in, or the account still needs the emailed code. */
@@ -120,6 +124,17 @@ export interface AuthState {
 }
 
 export const api = {
+  solutions: (params: { q?: string; everyone?: boolean } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.everyone) qs.set("everyone", "true");
+    return request<{ solutions: Solution[] }>(`/solutions${qs.size ? `?${qs}` : ""}`);
+  },
+  createSolution: (body: SolutionInput) => request<Solution>("/solutions", { method: "POST", body: JSON.stringify(body) }),
+  updateSolution: (id: string, body: SolutionInput) => request<Solution>(`/solutions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteSolution: async (id: string) => {
+    await request<unknown>(`/solutions/${id}`, { method: "DELETE" });
+  },
   me: () => request<AuthState>("/auth/me"),
   login: (email: string, password: string) =>
     request<SignInResult>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
