@@ -247,6 +247,13 @@ h1, h2, h3 {
 .doc th { color: var(--color-ink-2); font-weight: 600; }
 .doc a { color: var(--color-ion-strong); text-underline-offset: 3px; }
 
+/* Content that replaces a placeholder eases in instead of popping. */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in { animation: fade-in 180ms ease-out; }
+
 /* Shimmer for content that is being written right now. */
 @keyframes shimmer {
   0% { background-position: 100% 0; }
@@ -314,7 +321,7 @@ h1, h2, h3 {
 
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
-  .shimmer { animation: none; }
+  .shimmer, .fade-in { animation: none; }
   .dot-pulse { animation: none; }
   *, *::before, *::after { scroll-behavior: auto !important; }
 }

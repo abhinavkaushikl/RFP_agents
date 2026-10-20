@@ -191,7 +191,7 @@ export default function Workspace() {
   };
 
   return (
-    <div className="mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-8 xl:grid-cols-[200px_minmax(0,1fr)_340px]">
+    <div className="fade-in mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-8 xl:grid-cols-[200px_minmax(0,1fr)_340px]">
       {/* Outline */}
       <nav className="hidden xl:block" aria-label="Sections">
         <div className="sticky top-6 flex flex-col gap-0.5">

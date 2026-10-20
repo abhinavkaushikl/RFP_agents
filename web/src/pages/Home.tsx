@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, MessagesSquare, ScanSearch } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
@@ -39,7 +39,14 @@ function ScoreCell({ value }: { value: number | null }) {
 }
 
 export function RunRow({ run }: { run: RunSummary }) {
+  const queryClient = useQueryClient();
   const to = RUN_LINKS[run.workflow_type]?.(run.workflow_id);
+  // Start loading a proposal the moment the pointer is over it, so it is usually ready when the click lands.
+  const warm = () => {
+    if (run.workflow_type === "proposal_generation") {
+      void queryClient.prefetchQuery({ queryKey: ["run", run.workflow_id], queryFn: () => api.run(run.workflow_id), staleTime: 30_000 });
+    }
+  };
   const content = (
     <>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-raised text-ink-2">
@@ -58,7 +65,7 @@ export function RunRow({ run }: { run: RunSummary }) {
     </>
   );
   const cls = "flex items-center gap-3 px-5 py-3 transition-colors hover:bg-fill";
-  return to ? <Link to={to} className={cls}>{content}</Link> : <div className={cls}>{content}</div>;
+  return to ? <Link to={to} className={cls} onPointerEnter={warm} onFocus={warm} onTouchStart={warm}>{content}</Link> : <div className={cls}>{content}</div>;
 }
 
 export default function Home() {
