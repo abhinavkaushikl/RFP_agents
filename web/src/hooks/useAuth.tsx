@@ -14,6 +14,8 @@ interface AuthContextValue {
   signUp: (name: string, email: string, password: string) => Promise<string | undefined>;
   verifyEmail: (email: string, code: string) => Promise<void>;
   resendCode: (email: string) => Promise<void>;
+  forgotPassword: (email: string) => Promise<void>;
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -70,6 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       resendCode: async (email) => {
         await api.resendCode(email);
       },
+      forgotPassword: async (email) => {
+        await api.forgotPassword(email);
+      },
+      resetPassword: async (email, code, newPassword) => adopt((await api.resetPassword(email, code, newPassword)).user),
       signOut: async () => {
         await api.logout().catch(() => undefined);
         queryClient.clear();

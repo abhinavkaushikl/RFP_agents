@@ -20,6 +20,10 @@ from app.core.errors import AppError, InvalidRequestError, RateLimitedError
 from app.db.models import EmailOtp, User
 from app.services.mailer import send_code
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -77,6 +81,12 @@ def _normalize_email(email: str) -> str:
 class VerifyRequest(BaseModel):
     email: str = Field(max_length=320)
     code: str = Field(max_length=12)
+
+
+class ResetRequest(BaseModel):
+    email: str = Field(max_length=320)
+    code: str = Field(max_length=12)
+    new_password: str = Field(max_length=256)
 
 
 class EmailOnly(BaseModel):
@@ -200,6 +210,56 @@ def resend(body: EmailOnly, request: Request, db: Session = Depends(get_db)) -> 
     if user is not None and user.email_verified_at is None:
         _send_new_code(db, user, respect_cooldown=True)
     return {"ok": True}
+
+
+@router.post("/forgot")
+def forgot_password(body: EmailOnly, request: Request, db: Session = Depends(get_db)) -> dict:
+    """Email a one-time code that lets the owner of the address choose a new password."""
+    _throttle(request)
+    user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
+    if user is not None:
+        try:
+            _send_new_code(db, user, respect_cooldown=True)
+        except (RateLimitedError, AppError) as exc:
+            # Same answer whether or not the address has an account (and whether or not the mail went out),
+            # so this can't be used to find out who is registered. The failure is in the server log.
+            logger.warning("Password reset code for %s was not sent: %s", user.email, exc)
+    return {"ok": True}
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetRequest, request: Request, response: Response, db: Session = Depends(get_db)) -> dict:
+    _throttle(request)
+    settings = get_settings()
+    if len(body.new_password) < 8:
+        raise InvalidRequestError("Use at least 8 characters for the new password.")
+    wrong = UnauthorizedError("That code isn't right. Check it or ask for a new one.")
+    user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
+    otp = (
+        db.scalar(select(EmailOtp).where(EmailOtp.user_id == user.id).order_by(EmailOtp.created_at.desc()))
+        if user else None
+    )
+    if user is None or otp is None:
+        raise wrong
+    if _aware(otp.expires_at) < _now():
+        db.delete(otp)
+        db.commit()
+        raise UnauthorizedError("That code has expired. Ask for a new one.")
+    if otp.attempts >= settings.otp_max_attempts:
+        db.delete(otp)
+        db.commit()
+        raise RateLimitedError("Too many wrong codes. Ask for a new one.")
+    if not hmac.compare_digest(otp.code_hash, hash_code(str(user.id), body.code.strip())):
+        otp.attempts += 1
+        db.commit()
+        raise wrong
+    db.execute(delete(EmailOtp).where(EmailOtp.user_id == user.id))
+    user.password_hash = hash_password(body.new_password)
+    if user.email_verified_at is None:
+        user.email_verified_at = _now()  # they just proved they own the address
+    db.commit()
+    _set_cookie(response, user)
+    return {"user": _public(user)}
 
 
 @router.post("/login")

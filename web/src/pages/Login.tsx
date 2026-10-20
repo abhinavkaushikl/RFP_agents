@@ -192,7 +192,10 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const celebrating = useRef(false);
-  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, resendCode } = useAuth();
+  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, resendCode, forgotPassword, resetPassword } = useAuth();
+  // Forgot-password flow: ask for the address, then the emailed code and a new password.
+  const [reset, setReset] = useState<null | "email" | "code">(null);
+  const [newPassword, setNewPassword] = useState("");
   // Set once an emailed code is on its way; the page then asks for it instead of the form.
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -275,6 +278,48 @@ export default function Login() {
     }
   }
 
+  async function sendResetCode(e?: FormEvent) {
+    e?.preventDefault();
+    if (busy || !email.trim()) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await forgotPassword(email.trim());
+      setReset("code");
+      setCode("");
+      setCooldown(45);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitReset(e: FormEvent) {
+    e.preventDefault();
+    if (busy || code.length !== 6 || newPassword.length < 8) return;
+    setBusy(true);
+    setError(null);
+    celebrating.current = true;
+    try {
+      await resetPassword(email.trim(), code, newPassword);
+      finish();
+    } catch (err) {
+      fail(err);
+      celebrating.current = false;
+      setBusy(false);
+    }
+  }
+
+  function leaveReset() {
+    setReset(null);
+    setCode("");
+    setNewPassword("");
+    setError(null);
+    setNotice(null);
+  }
+
   function leaveCodeStep() {
     setPendingEmail(null);
     setCode("");
@@ -312,7 +357,71 @@ export default function Login() {
             Sign in and turn any request for proposal into a winning response.
           </motion.p>
 
-          {pendingEmail ? (
+          {reset ? (
+            <motion.form
+              key={`reset-${reset}`}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={spring.smooth}
+              onSubmit={reset === "email" ? sendResetCode : submitReset}
+              className="mt-8 space-y-4 rounded-[24px] border border-white/10 bg-white/[0.035] p-6 shadow-[0_30px_80px_-30px_rgb(0_0_0/0.7),inset_0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-md"
+            >
+              <div>
+                <h2 className="text-lead font-semibold">{reset === "email" ? "Reset your password" : "Choose a new password"}</h2>
+                <p className="mt-1 text-small text-ink-2">
+                  {reset === "email"
+                    ? "Enter your email and we'll send you a 6-digit code."
+                    : <>If <span className="font-medium text-ink">{email.trim()}</span> has an account, a code is on its way. It expires in 10 minutes.</>}
+                </p>
+              </div>
+              {reset === "email" ? (
+                <div className="relative">
+                  <input id="reset-email" type="email" autoComplete="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className={field} />
+                  <label htmlFor="reset-email" className={label}>Email</label>
+                </div>
+              ) : (
+                <>
+                  <input
+                    autoFocus
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    aria-label="6-digit code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    className="h-14 w-full rounded-[12px] border border-line-strong bg-fill text-center font-mono text-[1.6rem] tracking-[0.5em] text-ink outline-none transition placeholder:text-ink-3/50 focus:border-ion focus:bg-wash focus:shadow-[0_0_0_4px_var(--color-ion-soft)]"
+                  />
+                  <div className="relative">
+                    <input id="new-password" type={show ? "text" : "password"} autoComplete="new-password" required minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password" className={`${field} pr-12`} />
+                    <label htmlFor="new-password" className={label}>New password (8+ characters)</label>
+                    <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full text-ink-3 transition hover:bg-wash hover:text-ink">
+                      {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                </>
+              )}
+              {error && <p role="alert" className="rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-small text-bad-text">{error}</p>}
+              <motion.button
+                type="submit"
+                disabled={busy || (reset === "code" && (code.length !== 6 || newPassword.length < 8))}
+                whileTap={{ scale: 0.97 }}
+                transition={spring.snappy}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-gradient-to-b from-[#8c9bff] to-[#6577f5] text-body font-semibold text-on-ion shadow-[0_10px_28px_-8px_var(--color-glow-strong),inset_0_1px_0_rgb(255_255_255/0.35)] disabled:opacity-50"
+              >
+                {done ? <><Check className="size-4.5" /> Password updated</> : busy ? <Loader2 className="size-4.5 animate-spin" /> : reset === "email" ? <>Send code <ArrowRight className="size-4.5" /></> : <>Update password <ArrowRight className="size-4.5" /></>}
+              </motion.button>
+              <div className="flex items-center justify-between text-small">
+                <button type="button" onClick={leaveReset} className="inline-flex items-center gap-1 text-ink-3 hover:text-ink"><ArrowLeft className="size-3.5" /> Back to sign in</button>
+                {reset === "code" && (
+                  <button type="button" onClick={() => void sendResetCode()} disabled={cooldown > 0 || busy} className="text-ion-strong hover:underline disabled:text-ink-3 disabled:no-underline">
+                    {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+                  </button>
+                )}
+              </div>
+            </motion.form>
+          ) : pendingEmail ? (
             <motion.form
               key="code"
               initial={{ opacity: 0, y: 12 }}
@@ -384,6 +493,9 @@ export default function Login() {
                   {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
               </div>,
+              ...(mode === "signin"
+                ? [<div key="fp" className="-mt-1 flex justify-end"><button type="button" onClick={() => { setReset("email"); setError(null); }} className="text-small text-ion-strong hover:underline">Forgot password?</button></div>]
+                : []),
               ...(error ? [<p key="err" role="alert" className="rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-small text-bad-text">{error}</p>] : []),
               <div key="b">
                 <motion.button

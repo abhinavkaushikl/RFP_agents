@@ -127,6 +127,10 @@ export const api = {
     request<SignInResult>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
   verifyEmail: (email: string, code: string) =>
     request<{ user: AuthUser }>("/auth/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean }>("/auth/forgot", { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (email: string, code: string, newPassword: string) =>
+    request<{ user: AuthUser }>("/auth/reset-password", { method: "POST", body: JSON.stringify({ email, code, new_password: newPassword }) }),
   resendCode: (email: string) => request<{ ok: boolean }>("/auth/resend", { method: "POST", body: JSON.stringify({ email }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   ready: async (): Promise<Readiness> => {
