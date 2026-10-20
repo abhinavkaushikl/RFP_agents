@@ -5,7 +5,6 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -13,10 +12,17 @@ settings = get_settings()
 
 
 def _engine_options(url: str) -> dict:
-    # Serverless functions (Vercel) and Supabase's transaction pooler must not hold their own
-    # connection pool or use server-side prepared statements.
+    # Supabase's transaction pooler can't use server-side prepared statements. Vercel's fluid
+    # compute reuses an instance across requests, so keep a few warm connections instead of paying
+    # the TCP + TLS + auth handshake on every request; pre-ping drops ones that went stale while idle.
     if os.environ.get("VERCEL") or "pooler.supabase.com" in url:
-        return {"poolclass": NullPool, "connect_args": {"prepare_threshold": None}}
+        return {
+            "pool_size": 2,
+            "max_overflow": 3,
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
+            "connect_args": {"prepare_threshold": None},
+        }
     return {}
 
 
