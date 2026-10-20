@@ -23,6 +23,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from app.agentic.events import event_sink
+from app.api.deps import get_scope
 from app.api.security import rate_limit_requests, require_api_key
 from app.core.config import get_settings
 from app.core.errors import describe_exception
@@ -33,6 +34,7 @@ from app.schemas.api import DocumentMatchRequest, IntentDetectionRequest, Workfl
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 from app.services.llm_service import LLMService, get_llm_service
 from app.services.retrieval_service import RetrievalService
+from app.core.access import UNRESTRICTED, AccessScope
 from app.services.run_store import RunStore
 
 logger = get_logger(__name__)
@@ -44,13 +46,13 @@ _DONE = object()
 OrchestratorFactory = Callable[[Any], ProposalWorkflowOrchestrator]
 
 
-def _default_factory(llm: LLMService, embedding: EmbeddingService) -> OrchestratorFactory:
+def _default_factory(llm: LLMService, embedding: EmbeddingService, scope: AccessScope = UNRESTRICTED) -> OrchestratorFactory:
     def build(db) -> ProposalWorkflowOrchestrator:
         return ProposalWorkflowOrchestrator(
             retrieval_service=RetrievalService(db=db, embedding_service=embedding),
             llm_service=llm,
             embedding_service=embedding,
-            run_store=RunStore(db) if get_settings().persist_runs else None,
+            run_store=RunStore(db, scope) if get_settings().persist_runs else None,
         )
 
     return build
@@ -59,8 +61,9 @@ def _default_factory(llm: LLMService, embedding: EmbeddingService) -> Orchestrat
 def get_orchestrator_factory(
     llm: LLMService = Depends(get_llm_service),
     embedding: EmbeddingService = Depends(get_embedding_service),
+    scope: AccessScope = Depends(get_scope),
 ) -> OrchestratorFactory:
-    return _default_factory(llm, embedding)
+    return _default_factory(llm, embedding, scope)
 
 
 def _sse(event: str, data: Any) -> str:

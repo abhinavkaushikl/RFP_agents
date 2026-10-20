@@ -219,6 +219,10 @@ class WorkflowRun(Base):
     proposal_document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("proposal_documents.id"))
     latest_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     profile: Mapped[str | None] = mapped_column(String(64))
+    # Who created the run. Signed-in users only see their own; NULL = created before accounts existed.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
     result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -377,6 +381,9 @@ class LLMUsageEvent(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     workflow_type: Mapped[str | None] = mapped_column(String(100), index=True)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     agent: Mapped[str] = mapped_column(String(100), index=True)
     tool: Mapped[str | None] = mapped_column(String(100))
     section_key: Mapped[str | None] = mapped_column(String(100))

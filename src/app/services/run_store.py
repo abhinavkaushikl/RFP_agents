@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.agents.prompts import PROMPT_VERSION
+from app.core.access import UNRESTRICTED, AccessScope
 from app.core.logging import get_logger
 from app.db.models import (
     GeneratedSection,
@@ -64,8 +65,20 @@ def _uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
 
 
 class RunStore:
-    def __init__(self, db: Session) -> None:
+    """Reads are limited to what `scope` may see; writes record `scope.owner_id` as the owner."""
+
+    def __init__(self, db: Session, scope: AccessScope = UNRESTRICTED) -> None:
         self.db = db
+        self.scope = scope
+
+    # ── access ────────────────────────────────────────────────────────
+    def _visible_run(self, run_id: uuid.UUID | None) -> WorkflowRun | None:
+        """The run if this viewer may see it; None otherwise, so callers answer "not found"."""
+        run = self.db.get(WorkflowRun, run_id) if run_id else None
+        return run if run is not None and self.scope.allows(run.owner_id) else None
+
+    def _only_mine(self, query, column):
+        return query.where(column == self.scope.owner_id) if self.scope.restricted else query
 
     # ── writes ────────────────────────────────────────────────────────
     def save_workflow(
@@ -87,6 +100,7 @@ class RunStore:
                 workflow_type=workflow_type,
                 status=_STATUS.get(status, WorkflowStatus.completed),
                 profile=profile,
+                owner_id=self.scope.owner_id,
                 payload_json=payload,
                 result_json=result,
                 completed_at=datetime.now(timezone.utc),
@@ -200,12 +214,12 @@ class RunStore:
         for rec in records:
             data = {k: rec.get(k) for k in _USAGE_FIELDS}
             data["error"] = (data.get("error") or None) and str(data["error"])[:2000]
-            self.db.add(LLMUsageEvent(workflow_id=wid, workflow_type=workflow_type, **{k: v for k, v in data.items() if v is not None}))
+            self.db.add(LLMUsageEvent(workflow_id=wid, workflow_type=workflow_type, owner_id=self.scope.owner_id, **{k: v for k, v in data.items() if v is not None}))
 
     # ── reads ─────────────────────────────────────────────────────────
     def get_workflow(self, workflow_id: str) -> dict[str, Any] | None:
         """A stored run; each section carries its latest revision text."""
-        run = self.db.get(WorkflowRun, _uuid(workflow_id)) if _uuid(workflow_id) else None
+        run = self._visible_run(_uuid(workflow_id))
         if run is None:
             return None
         result = copy.deepcopy(run.result_json or {})
@@ -243,6 +257,7 @@ class RunStore:
 
     def list_workflows(self, *, limit: int = 20, workflow_type: str | None = None) -> list[dict[str, Any]]:
         query = select(WorkflowRun).order_by(WorkflowRun.created_at.desc()).limit(max(1, min(limit, 100)))
+        query = self._only_mine(query, WorkflowRun.owner_id)
         if workflow_type:
             query = query.where(WorkflowRun.workflow_type == workflow_type)
         out = []
@@ -272,7 +287,7 @@ class RunStore:
         if sid is None:
             return None
         section = self.db.get(GeneratedSection, sid)
-        if section is None:
+        if section is None or self._visible_run(section.workflow_run_id) is None:
             return None
         rev = self.db.get(GeneratedSectionRevision, section.latest_revision_id) if section.latest_revision_id else None
         return {
@@ -287,6 +302,9 @@ class RunStore:
     def list_section_revisions(self, section_id: str) -> list[dict[str, Any]]:
         sid = _uuid(section_id)
         if sid is None:
+            return []
+        section = self.db.get(GeneratedSection, sid)
+        if section is None or self._visible_run(section.workflow_run_id) is None:
             return []
         rows = self.db.execute(
             select(GeneratedSectionRevision)
@@ -311,9 +329,10 @@ class RunStore:
         wid = _uuid(workflow_id)
         if wid is None:
             return None
-        rows = self.db.execute(
-            select(LLMUsageEvent).where(LLMUsageEvent.workflow_id == wid).order_by(LLMUsageEvent.created_at)
-        ).scalars().all()
+        query = self._only_mine(
+            select(LLMUsageEvent).where(LLMUsageEvent.workflow_id == wid), LLMUsageEvent.owner_id,
+        )
+        rows = self.db.execute(query.order_by(LLMUsageEvent.created_at)).scalars().all()
         if not rows:
             return None
         return build_report([self._usage_dict(r) for r in rows], workflow_id=workflow_id)
@@ -321,7 +340,7 @@ class RunStore:
     def usage_summary(self, days: int = 7) -> dict[str, Any]:
         since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
         rows = self.db.execute(
-            select(LLMUsageEvent).where(LLMUsageEvent.created_at >= since)
+            self._only_mine(select(LLMUsageEvent).where(LLMUsageEvent.created_at >= since), LLMUsageEvent.owner_id)
         ).scalars().all()
         records = [self._usage_dict(r) for r in rows]
         report = build_report(records, include_calls=False)
@@ -350,6 +369,7 @@ class RunStore:
         query = select(LLMUsageEvent).where(
             LLMUsageEvent.created_at >= since, LLMUsageEvent.workflow_id.is_not(None),
         )
+        query = self._only_mine(query, LLMUsageEvent.owner_id)
         if workflow_type:
             query = query.where(LLMUsageEvent.workflow_type == workflow_type)
         by_run: dict[str, list[dict[str, Any]]] = {}

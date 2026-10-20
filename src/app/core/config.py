@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
     auth_session_ttl_s: int = Field(default=7 * 24 * 3600, ge=60)
     auth_allow_signup: bool = True
+    admin_emails: str = Field(default="", description="Comma-separated emails that can see every user's runs")
     auth_login_attempts_per_minute: int = Field(default=10, ge=0, description="Per client IP; 0 disables")
     cors_origins: str = "http://localhost:5173,http://localhost:8501"
     api_rate_limit_per_minute: int = Field(default=60, ge=0, description="Per client; 0 disables")
@@ -139,6 +140,10 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [key.strip() for key in self.api_keys.split(",") if key.strip()]
+
+    @property
+    def admin_email_list(self) -> list[str]:
+        return [email.strip().lower() for email in self.admin_emails.split(",") if email.strip()]
 
     @property
     def cors_origin_list(self) -> list[str]:

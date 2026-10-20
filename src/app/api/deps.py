@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Generator
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from app.api.security import SESSION_COOKIE
+from app.core.access import UNRESTRICTED, AccessScope
+from app.core.auth_crypto import read_session
 from app.core.config import get_settings
 from app.db.session import get_db as _get_db
 from app.orchestration.orchestrator import ProposalWorkflowOrchestrator
@@ -18,6 +22,25 @@ from app.services.run_store import RunStore
 
 def get_db() -> Generator[Session, None, None]:
     yield from _get_db()
+
+
+def get_scope(request: Request, db: Session = Depends(get_db)) -> AccessScope:
+    """Signed-in members are restricted to their own runs; admins, API keys and no-auth use are not."""
+    user_id = read_session(request.cookies.get(SESSION_COOKIE))
+    if not user_id:
+        return UNRESTRICTED
+    try:
+        owner = uuid.UUID(user_id)
+    except ValueError:
+        return UNRESTRICTED
+    admins = get_settings().admin_email_list
+    if admins:
+        from app.db.models import User
+
+        user = db.get(User, owner)
+        if user is not None and user.email.lower() in admins:
+            return AccessScope(owner_id=owner, restricted=False)
+    return AccessScope(owner_id=owner, restricted=True)
 
 
 def get_retrieval_service(
@@ -34,8 +57,8 @@ def get_ingestion_service(
     return IngestionService(db=db, embedding_service=embedding_service)
 
 
-def get_run_store(db: Session = Depends(get_db)) -> RunStore:
-    return RunStore(db)
+def get_run_store(db: Session = Depends(get_db), scope: AccessScope = Depends(get_scope)) -> RunStore:
+    return RunStore(db, scope)
 
 
 def get_orchestration_service(

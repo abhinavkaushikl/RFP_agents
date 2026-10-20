@@ -59,3 +59,4 @@ def rate_limit_requests(request: Request, api_key: str | None = Depends(require_
     allowed, retry_after = _api_limiter().hit(identity, limit)
     if not allowed:
         raise RateLimitedError(f"Rate limit of {limit} requests per minute exceeded.", retry_after=retry_after)
+
