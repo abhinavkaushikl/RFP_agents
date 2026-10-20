@@ -174,7 +174,8 @@ export function StackedColumnChart({ columns, series, format, height = 280, labe
             // The 2px gaps come out of the segments, so the cap still lands on the column's value.
             const fill = Math.max(0, barH - 2 * Math.max(0, shown.length - 1));
             const isActive = active === i;
-            const align = i < columns.length / 3 ? "left-0" : i >= (columns.length * 2) / 3 ? "right-0" : "left-1/2 -translate-x-1/2";
+            // Beside the column, on the side with more room, so the hovered column stays visible.
+            const beside = i >= columns.length / 2 ? { right: "calc(50% + 18px)" } : { left: "calc(50% + 18px)" };
             const clickable = Boolean(onSelect) && !c.disabled;
             return (
               <button
@@ -210,7 +211,8 @@ export function StackedColumnChart({ columns, series, format, height = 280, labe
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={spring.snappy}
-                    className={clsx("pointer-events-none absolute top-0 z-10 w-max min-w-44 max-w-72 rounded-control border border-line bg-overlay px-3 py-2 text-left shadow-float", align)}
+                    className="pointer-events-none absolute top-0 z-10 w-max min-w-44 max-w-72 rounded-control border border-line bg-overlay px-3 py-2 text-left shadow-float"
+                    style={beside}
                   >
                     <span className="tabular block text-small font-semibold text-ink">{format(totals[i])} tokens</span>
                     <span className="block truncate text-caption text-ink-3">{c.label}{c.sub ? ` · ${c.sub}` : ""}</span>
