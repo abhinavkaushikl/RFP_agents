@@ -30,7 +30,16 @@ function lastDays(days: number): string[] {
 }
 
 const RUNS_SHOWN = 12;
-const NAMED_SECTIONS = 6; // series slots; any further sections fold into "Other sections"
+// Spelled out in full: the CSS build drops theme variables whose names never appear in the source.
+const SERIES_COLORS = [
+  "var(--color-series-1)",
+  "var(--color-series-2)",
+  "var(--color-series-3)",
+  "var(--color-series-4)",
+  "var(--color-series-5)",
+  "var(--color-series-6)",
+];
+const NAMED_SECTIONS = SERIES_COLORS.length; // any further sections fold into "Other sections"
 const OTHER = "__other_sections";
 const BASE = "__planning";
 
@@ -85,7 +94,7 @@ function runStacks(runs: RunUsage[], profile: Profile | undefined, titles: Recor
   });
 
   const series: StackSeries[] = [
-    ...[...present].sort((a, b) => slot(a) - slot(b)).map((key) => ({ key, label: name(key), color: `var(--color-series-${slot(key) + 1})` })),
+    ...[...present].sort((a, b) => slot(a) - slot(b)).map((key) => ({ key, label: name(key), color: SERIES_COLORS[slot(key)] })),
     ...(anyOther ? [{ key: OTHER, label: "Other sections", color: "var(--color-series-other)" }] : []),
     ...(anyBase ? [{ key: BASE, label: "Planning & checks", color: "var(--color-series-base)" }] : []),
   ];
