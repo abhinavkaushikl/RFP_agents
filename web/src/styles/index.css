@@ -10,10 +10,10 @@
 @theme {
   /* Dark is the default theme; light overrides live under :root[data-theme="light"]. */
   /* surfaces, darkest to lightest */
-  --color-canvas: #15171c;
-  --color-panel: #1b1e25;
-  --color-raised: #232731;
-  --color-overlay: #2b303b;
+  --color-canvas: #0d0f16;
+  --color-panel: #161921;
+  --color-raised: #1e2230;
+  --color-overlay: #252a38;
   --color-line: rgb(255 255 255 / 0.07);
   --color-line-strong: rgb(255 255 255 / 0.13);
   --color-wash: rgb(255 255 255 / 0.05);
@@ -41,6 +41,10 @@
   --color-viz-2: #199e70;
   --color-viz-3: #d95926;
   --color-viz-track: rgb(108 127 242 / 0.18);
+
+  /* glow — used in box-shadow and backdrop effects */
+  --color-glow: rgb(123 140 255 / 0.2);
+  --color-glow-strong: rgb(123 140 255 / 0.36);
 
   /* status: always paired with an icon and a label */
   --color-good: #0ca30c;
@@ -127,6 +131,9 @@
 
   --shadow-float: 0 18px 48px -14px rgb(20 24 40 / 0.22), 0 0 0 1px rgb(20 24 40 / 0.06);
   --shadow-lift: 0 1px 2px rgb(20 24 40 / 0.08);
+
+  --color-glow: rgb(68 87 217 / 0.14);
+  --color-glow-strong: rgb(68 87 217 / 0.26);
 }
 
 
@@ -138,7 +145,14 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-canvas);
+  background-color: var(--color-canvas);
+  /* Deep-space nebula gradients — glass panels blur these for depth */
+  background-image:
+    radial-gradient(ellipse 90% 65% at 5% -12%,  rgb(55  30  190 / 0.18) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 55% at 95% 110%,  rgb(10  65  200 / 0.14) 0%, transparent 50%),
+    radial-gradient(ellipse 55% 42% at 50%  60%,  rgb(80  15  160 / 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 35% at 78%  10%,  rgb(0   100 180 / 0.07) 0%, transparent 50%);
+  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-size: var(--text-body);
@@ -149,13 +163,25 @@ body {
   font-optical-sizing: auto;
 }
 
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 8% -5%,  rgb(68 87 217 / 0.05) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 95% 105%, rgb(140 100 255 / 0.04) 0%, transparent 55%);
+}
+
+/* Stars are a dark-mode feature — fade them almost away on light backgrounds */
+:root[data-theme="light"] canvas.star-field {
+  opacity: 0.08;
+}
+
 ::selection {
   background: var(--selection);
 }
 
+/* Apple-style soft glow focus ring instead of a sharp outline */
 :focus-visible {
-  outline: 2px solid var(--color-ion);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-ion), 0 0 12px -2px var(--color-glow);
   border-radius: 6px;
 }
 
@@ -205,13 +231,58 @@ h1, h2, h3 {
 
 /* Shimmer for content that is being written right now. */
 @keyframes shimmer {
-  from { background-position: -200% 0; }
-  to { background-position: 200% 0; }
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 .shimmer {
-  background: linear-gradient(90deg, var(--color-fill) 25%, var(--color-wash-strong) 50%, var(--color-fill) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s linear infinite;
+  background: linear-gradient(
+    105deg,
+    var(--color-fill) 0%,
+    var(--color-fill) 30%,
+    var(--color-wash-strong) 48%,
+    rgb(255 255 255 / 0.04) 50%,
+    var(--color-wash-strong) 52%,
+    var(--color-fill) 70%,
+    var(--color-fill) 100%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 2.2s ease-in-out infinite;
+}
+
+/* Pulsing glow ring for the "ready" status dot */
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(12 163 12 / 0.5); }
+  60% { box-shadow: 0 0 0 5px rgb(12 163 12 / 0); }
+}
+.dot-pulse {
+  animation: dot-pulse 2.4s ease-out infinite;
+}
+
+/* Gradient text — use on headings or key words */
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-ion-strong) 0%, #c084fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Liquid glass surface — backdrop-blur + semi-transparent fill */
+.glass {
+  background: rgb(27 30 37 / 0.6);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+:root[data-theme="light"] .glass {
+  background: rgb(255 255 255 / 0.65);
+}
+
+/* Inner-top highlight — gives panels a physical "lit from above" feel */
+.panel-highlight {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+:root[data-theme="light"] .panel-highlight {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9);
 }
 
 /* Theme switch: the new theme grows out of the toggle as a circle (View Transitions API). */
@@ -231,5 +302,6 @@ h1, h2, h3 {
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-new(root) { animation: none; }
   .shimmer { animation: none; }
+  .dot-pulse { animation: none; }
   *, *::before, *::after { scroll-behavior: auto !important; }
 }

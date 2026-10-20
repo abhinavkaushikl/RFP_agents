@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     log_json: bool = False
     api_prefix: str = "/api"
     api_keys: str = Field(default="", description="Comma-separated API keys; empty disables auth")
+    auth_required: bool = Field(default=False, description="Require a signed-in user (or API key) on every API route")
+    auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
+    auth_session_ttl_s: int = Field(default=7 * 24 * 3600, ge=60)
+    auth_allow_signup: bool = True
+    auth_login_attempts_per_minute: int = Field(default=10, ge=0, description="Per client IP; 0 disables")
     cors_origins: str = "http://localhost:5173,http://localhost:8501"
     api_rate_limit_per_minute: int = Field(default=60, ge=0, description="Per client; 0 disables")
 
@@ -77,6 +82,11 @@ class Settings(BaseSettings):
     # ── Embeddings ─────────────────────────────────────────────────────
     embedding_dimensions: int = Field(default=384, ge=1)
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # "local" runs sentence-transformers in-process (needs torch). "remote" calls an OpenAI-compatible
+    # /embeddings endpoint, which is what serverless hosts such as Vercel need.
+    embedding_provider: Literal["local", "remote"] = "local"
+    embedding_api_url: str = Field(default="", description="e.g. https://api.example.com/v1/embeddings")
+    embedding_api_key: SecretStr | None = None
 
     # ── LLM (Groq) ─────────────────────────────────────────────────────
     llm_provider: Literal["groq"] = "groq"

@@ -18,8 +18,15 @@ type Variant = "primary" | "secondary" | "ghost" | "quiet";
 type Size = "sm" | "md" | "lg";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-ion text-on-ion font-semibold hover:bg-ion-strong disabled:bg-ion/40",
-  secondary: "bg-raised text-ink border border-line-strong hover:bg-overlay",
+  primary:
+    "bg-ion text-on-ion font-semibold " +
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_0_rgb(0_0_0/0.12),0_4px_14px_-3px_var(--color-glow)] " +
+    "hover:bg-ion-strong hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_0_rgb(0_0_0/0.12),0_6px_20px_-4px_var(--color-glow-strong)] " +
+    "disabled:bg-ion/40 disabled:shadow-none",
+  secondary:
+    "bg-raised/80 backdrop-blur-sm text-ink border border-line-strong " +
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.07)] " +
+    "hover:bg-overlay/90 hover:border-ink-3/50 hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.1)]",
   ghost: "text-ink-2 hover:text-ink hover:bg-wash",
   quiet: "text-ion-strong hover:bg-ion-soft",
 };
@@ -211,7 +218,11 @@ const toneIcon: Record<Tone, ReactNode> = {
 
 export function StatusTag({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
   return (
-    <span className={clsx("inline-flex items-center gap-1.5 rounded-full border border-line bg-fill px-2 py-0.5 text-caption text-ink-2", className)}>
+    <span className={clsx(
+      "inline-flex items-center gap-1.5 rounded-full border border-line bg-fill px-2 py-0.5 text-caption text-ink-2",
+      "shadow-[inset_0_1px_0_rgb(255_255_255/0.05)] backdrop-blur-sm",
+      className,
+    )}>
       {toneIcon[tone]}
       {children}
     </span>
@@ -240,7 +251,15 @@ export function Chip({ children, active, onClick }: { children: ReactNode; activ
 /* ── Layout helpers ─────────────────────────────────────────────────── */
 
 export function Panel({ children, className, as: Tag = "section" }: { children: ReactNode; className?: string; as?: "section" | "div" | "aside" }) {
-  return <Tag className={clsx("rounded-panel border border-line bg-panel", className)}>{children}</Tag>;
+  return (
+    <Tag className={clsx(
+      "rounded-panel border border-line bg-panel",
+      "shadow-[inset_0_1px_0_rgb(255_255_255/0.07)]",
+      className,
+    )}>
+      {children}
+    </Tag>
+  );
 }
 
 export function PanelHeader({ title, action, description }: { title: ReactNode; action?: ReactNode; description?: ReactNode }) {
@@ -278,7 +297,9 @@ export function Skeleton({ className }: { className?: string }) {
 export function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-start gap-3 px-6 py-10">
-      <div className="flex size-10 items-center justify-center rounded-panel bg-raised text-ink-2">{icon}</div>
+      <div className="flex size-11 items-center justify-center rounded-panel bg-gradient-to-b from-raised to-overlay text-ink-2 shadow-[inset_0_1px_0_rgb(255_255_255/0.09),0_2px_6px_rgb(0_0_0/0.18)]">
+        {icon}
+      </div>
       <div>
         <p className="text-body font-semibold text-ink">{title}</p>
         <p className="mt-1 max-w-[52ch] text-small text-ink-3">{description}</p>

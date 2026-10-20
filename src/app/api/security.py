@@ -7,6 +7,7 @@ from functools import lru_cache
 
 from fastapi import Depends, Header, Request
 
+from app.core.auth_crypto import read_session
 from app.core.config import get_settings
 from app.core.errors import AppError, RateLimitedError
 from app.core.redis import get_redis
@@ -18,14 +19,27 @@ class UnauthorizedError(AppError):
     code = "unauthorized"
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> str | None:
-    """Enforced only when RFP_API_KEYS is set."""
-    keys = get_settings().api_key_list
-    if not keys:
-        return None
-    if not x_api_key or not any(hmac.compare_digest(x_api_key, key) for key in keys):
+SESSION_COOKIE = "rfp_session"
+
+
+class SignInRequiredError(UnauthorizedError):
+    code = "auth_required"
+
+
+def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> str | None:
+    """Accept a signed-in session or an API key. Enforced when RFP_AUTH_REQUIRED or RFP_API_KEYS is set."""
+    settings = get_settings()
+    user_id = read_session(request.cookies.get(SESSION_COOKIE))
+    if user_id:
+        return f"user:{user_id}"
+    keys = settings.api_key_list
+    if keys and x_api_key and any(hmac.compare_digest(x_api_key, key) for key in keys):
+        return x_api_key
+    if settings.auth_required:
+        raise SignInRequiredError("Sign in to continue.")
+    if keys:
         raise UnauthorizedError("Missing or invalid X-API-Key header.")
-    return x_api_key
+    return None
 
 
 @lru_cache

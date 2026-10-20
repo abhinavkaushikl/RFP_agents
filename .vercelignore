@@ -1,0 +1,9 @@
+.venv
+.env
+out
+notebooks
+ui
+tests
+data
+web/node_modules
+web/dist

@@ -15,16 +15,19 @@ import {
   Radar,
   ScanSearch,
   Search,
+  LogOut,
   Settings2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, useLocation, useOutlet } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useOutlet } from "react-router-dom";
 
+import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { useReadiness } from "@/hooks/useReadiness";
 import { pageVariants, spring } from "@/lib/motion";
 import { CommandPalette } from "./CommandPalette";
+import { StarField } from "./StarField";
 import { ThemeToggle } from "./ThemeToggle";
 import { Kbd } from "./ui";
 
@@ -115,10 +118,16 @@ function NavRow({ item, expanded, onNavigate }: { item: NavItem; expanded: boole
             <motion.span
               layoutId="nav-active"
               transition={spring.snappy}
-              className="absolute inset-0 rounded-control bg-raised shadow-lift"
+              className="absolute inset-0 rounded-control bg-raised shadow-[inset_0_1px_0_rgb(255_255_255/0.09),0_0_0_1px_rgb(123_140_255/0.14)]"
             />
           )}
-          <span className={clsx("relative shrink-0", isActive && "text-ion")}>{item.icon}</span>
+          <motion.span
+            animate={{ scale: isActive ? 1.1 : 1 }}
+            transition={spring.snappy}
+            className={clsx("relative shrink-0", isActive && "text-ion")}
+          >
+            {item.icon}
+          </motion.span>
           {expanded && <span className="relative truncate">{item.label}</span>}
         </>
       )}
@@ -147,7 +156,11 @@ function Sidebar({ expanded, onToggle, onNavigate, mobile }: {
     <motion.aside
       animate={{ width: expanded ? 236 : 64 }}
       transition={spring.smooth}
-      className={clsx("flex h-full shrink-0 flex-col border-r border-line bg-panel", mobile && "w-[236px]")}
+      className={clsx(
+        "flex h-full shrink-0 flex-col border-r border-line",
+        "bg-panel/80 backdrop-blur-2xl",
+        mobile && "w-[236px]",
+      )}
       aria-label="Main navigation"
     >
       <div className="flex h-14 items-center px-3.5">
@@ -202,7 +215,7 @@ function ConnectionStatus() {
   return (
     <Popover.Root>
       <Popover.Trigger className="flex h-8 items-center gap-2 rounded-control px-2.5 text-small text-ink-2 hover:bg-wash hover:text-ink">
-        <span className={clsx("size-2 rounded-full", dot, state === "ready" && "shadow-[0_0_0_3px_rgb(12_163_12/0.18)]")} aria-hidden />
+        <span className={clsx("size-2 rounded-full", dot, state === "ready" && "dot-pulse")} aria-hidden />
         <span className="hidden sm:inline">{label}</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -343,7 +356,8 @@ export function AppShell() {
 
   return (
     <Tooltip.Provider>
-      <div className="flex h-dvh overflow-hidden">
+      <StarField />
+      <div className="relative z-[1] flex h-dvh overflow-hidden">
         {!isMobile && <Sidebar expanded={expanded && !isNarrow} onToggle={isNarrow ? undefined : toggle} />}
         <AnimatePresence>
           {isMobile && drawer && (
@@ -373,7 +387,7 @@ export function AppShell() {
         </AnimatePresence>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/80 px-4 backdrop-blur-xl sm:px-6">
+          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/75 px-4 backdrop-blur-2xl shadow-[0_1px_12px_-4px_rgb(0_0_0/0.2)] sm:px-6">
             {isMobile && (
               <button type="button" onClick={() => setDrawer(true)} aria-label="Open navigation" className="-ml-1 rounded-control p-1.5 text-ink-2 hover:text-ink">
                 <Menu className="size-5" />
@@ -395,6 +409,7 @@ export function AppShell() {
               </button>
               <ProfileSwitcher />
               <ThemeToggle />
+              <AccountButton />
               <ConnectionStatus />
             </div>
           </header>
@@ -416,5 +431,29 @@ export function AppShell() {
       </div>
       <CommandPalette open={palette} onOpenChange={setPalette} />
     </Tooltip.Provider>
+  );
+}
+
+
+/** Shows who is signed in and offers sign-out; renders nothing when the server has no accounts in play. */
+function AccountButton() {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  if (!user) return null;
+  const initial = (user.name || user.email).charAt(0).toUpperCase();
+  return (
+    <button
+      type="button"
+      title={`Sign out ${user.email}`}
+      aria-label={`Sign out ${user.email}`}
+      onClick={async () => {
+        await signOut();
+        navigate("/login", { replace: true });
+      }}
+      className="group flex h-8 items-center gap-1.5 rounded-full border border-line bg-panel pl-1 pr-2.5 text-small text-ink-2 hover:border-line-strong hover:text-ink"
+    >
+      <span className="grid size-6 place-items-center rounded-full bg-ion-soft text-caption font-semibold text-ion-strong">{initial}</span>
+      <LogOut className="size-3.5" aria-hidden />
+    </button>
   );
 }

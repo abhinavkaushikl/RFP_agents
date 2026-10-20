@@ -48,13 +48,20 @@ export function DropZone({ onFiles, multiple, accept = DOCUMENT_TYPES, title, hi
       className={clsx(
         "group relative flex cursor-pointer flex-col items-center justify-center rounded-panel border border-dashed text-center outline-none transition-colors",
         compact ? "gap-2 px-4 py-6" : "gap-3 px-6 py-12",
-        over ? "border-ion bg-ion-soft" : "border-line-strong bg-panel/60 hover:border-ink-3/60",
+        over
+          ? "border-ion bg-ion-soft shadow-[0_0_0_3px_var(--color-ion-soft),0_0_50px_-8px_var(--color-glow)]"
+          : "border-line-strong bg-panel/60 hover:border-ink-3/60 hover:shadow-[0_0_0_3px_var(--color-wash)]",
       )}
     >
       <motion.div
-        animate={{ y: over ? -4 : 0 }}
-        transition={spring.land}
-        className={clsx("flex size-10 items-center justify-center rounded-full", over ? "bg-ion text-on-ion" : "bg-raised text-ink-2")}
+        animate={{ y: over ? -10 : 0, scale: over ? 1.12 : 1 }}
+        transition={spring.elastic}
+        className={clsx(
+          "flex size-10 items-center justify-center rounded-full transition-shadow",
+          over
+            ? "bg-ion text-on-ion shadow-[0_0_24px_-2px_var(--color-glow-strong)]"
+            : "bg-raised text-ink-2 shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]",
+        )}
       >
         <FileUp className="size-5" aria-hidden />
       </motion.div>

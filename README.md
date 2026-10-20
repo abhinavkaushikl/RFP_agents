@@ -180,7 +180,12 @@ prices from `RFP_LLM_PRICING` (October 2026); update them if your contract diffe
 | GET | `/api/profiles`, `/api/profiles/{name}` | Profiles and model routing (used by the UI) |
 | GET | `/api/health`, `/api/health/ready` | Liveness; readiness of database, Redis, Groq configuration, and profile |
 
-Set `RFP_API_KEYS` to require an `X-API-Key` header. Errors share one shape:
+| POST | `/api/auth/signup`, `/api/auth/login`, `/api/auth/logout` | Accounts; sets an HttpOnly session cookie |
+| GET | `/api/auth/me` | Current user and whether the server requires sign-in (never 401s) |
+
+Set `RFP_AUTH_REQUIRED=true` (and `RFP_AUTH_SECRET`) to require a signed-in user on every route; the web app then
+shows the login page. Run `alembic upgrade head` to create the `users` table. `RFP_API_KEYS` still works for
+scripts: an `X-API-Key` header is accepted wherever a session is. Errors share one shape:
 `{"error": {"code", "message", "request_id"}}`. A missing Groq key returns 503 `llm_not_configured`,
 and exhausted rate limits return 429 with `Retry-After`.
 

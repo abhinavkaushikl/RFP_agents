@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routers.auth import router as auth_router
 from app.api.routers.health import router as health_router
 from app.api.routers.ingestion import router as ingestion_router
 from app.api.routers.profiles import router as profiles_router
@@ -74,7 +75,7 @@ def create_app() -> FastAPI:
         return response
 
     register_error_handlers(app)
-    for router in (health_router, profiles_router, ingestion_router, retrieval_router, streams_router,
+    for router in (auth_router, health_router, profiles_router, ingestion_router, retrieval_router, streams_router,
                    workflows_router, usage_router):
         app.include_router(router, prefix=settings.api_prefix)
     _mount_web_app(app, settings.api_prefix)

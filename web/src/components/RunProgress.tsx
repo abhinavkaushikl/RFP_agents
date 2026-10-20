@@ -80,9 +80,12 @@ export function PlanTrack<T>({ state }: { state: RunState<T> }) {
                 {i < steps.length - 1 && (
                   <span className="relative mx-2 h-0.5 flex-1 overflow-hidden rounded-full bg-line-strong">
                     <motion.span
-                      className="absolute inset-y-0 left-0 rounded-full bg-ion"
+                      className={clsx(
+                        "absolute inset-y-0 left-0 rounded-full",
+                        step.status === "running" ? "shimmer bg-ion" : "bg-ion",
+                      )}
                       initial={{ width: 0 }}
-                      animate={{ width: step.status === "done" ? "100%" : step.status === "running" ? "35%" : "0%" }}
+                      animate={{ width: step.status === "done" ? "100%" : step.status === "running" ? "40%" : "0%" }}
                       transition={spring.smooth}
                     />
                   </span>
@@ -106,8 +109,10 @@ function SectionCard({ section }: { section: LiveSection }) {
       layout
       transition={spring.smooth}
       className={clsx(
-        "overflow-hidden rounded-panel border bg-panel",
-        section.status === "writing" ? "border-ion-line" : "border-line",
+        "overflow-hidden rounded-panel border",
+        section.status === "writing"
+          ? "border-ion-line bg-panel/80 backdrop-blur-sm shadow-[0_0_30px_-8px_var(--color-glow),inset_0_1px_0_rgb(255_255_255/0.08)]"
+          : "border-line bg-panel shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]",
       )}
     >
       <div className="flex items-center gap-3 px-4 py-3">

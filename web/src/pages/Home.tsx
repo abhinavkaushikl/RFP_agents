@@ -10,7 +10,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { useReadiness } from "@/hooks/useReadiness";
 import { api, ApiError } from "@/lib/api";
 import { fmtCompact, fmtCost, fmtRelative } from "@/lib/format";
-import { spring } from "@/lib/motion";
+import { listItemVariants, listVariants, spring } from "@/lib/motion";
 import type { RunSummary } from "@/lib/types";
 
 const RUN_LINKS: Record<string, (id: string) => string> = {
@@ -95,7 +95,8 @@ export default function Home() {
             transition={spring.smooth}
             className="max-w-[22ch] text-[2.4rem] font-semibold leading-[1.1] tracking-[-0.02em] text-ink"
           >
-            Turn an RFP into a first draft.
+            Turn an RFP into{" "}
+            <span className="gradient-text">a first draft.</span>
           </motion.h1>
           <p className="mt-3 max-w-[60ch] text-lead text-ink-2">
             The agents read the requirements, match them to {hasOrg ? `${orgName}'s` : "your"} offerings, reuse your best
@@ -126,9 +127,18 @@ export default function Home() {
           ) : runs.isError ? (
             <div className="p-5"><Notice tone="bad" title="Recent work is unavailable">{(runs.error as Error).message}</Notice></div>
           ) : runs.data?.runs.length ? (
-            <div className="divide-y divide-line">
-              {runs.data.runs.map((run) => <RunRow key={run.workflow_id} run={run} />)}
-            </div>
+            <motion.div
+              variants={listVariants}
+              initial="hidden"
+              animate="visible"
+              className="divide-y divide-line"
+            >
+              {runs.data.runs.map((run) => (
+                <motion.div key={run.workflow_id} variants={listItemVariants}>
+                  <RunRow run={run} />
+                </motion.div>
+              ))}
+            </motion.div>
           ) : (
             <EmptyState
               icon={<FileText className="size-5" />}
@@ -147,19 +157,24 @@ export default function Home() {
         )}
         <Panel>
           <PanelHeader title="Last 7 days" action={<Link to="/usage" className="text-small text-ion-strong hover:underline">Usage</Link>} />
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-4 p-5">
+          <motion.dl
+            variants={listVariants}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-2 gap-x-4 gap-y-4 p-5"
+          >
             {[
               ["Runs", week.data?.workflows ?? 0, (n: number) => String(n)],
               ["Tokens", week.data?.totals.total_tokens ?? 0, fmtCompact],
               ["Cost", week.data?.totals.cost_usd ?? 0, fmtCost],
               ["Saved by cache", week.data?.totals.saved_tokens ?? 0, fmtCompact],
             ].map(([label, value, fmt]) => (
-              <div key={label as string}>
+              <motion.div key={label as string} variants={listItemVariants}>
                 <dt className="text-small text-ink-3">{label as string}</dt>
                 <dd className="mt-0.5 text-title font-semibold text-ink">{(fmt as (n: number) => string)(value as number)}</dd>
-              </div>
+              </motion.div>
             ))}
-          </dl>
+          </motion.dl>
         </Panel>
         <Panel>
           <PanelHeader title="Writing as" />

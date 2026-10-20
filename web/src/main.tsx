@@ -4,15 +4,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
 import { lazy, StrictMode, Suspense, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
 import { reloadForUpdate, RouteError } from "@/components/RouteError";
 import { ToastProvider } from "@/components/Toast";
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ProfileProvider } from "@/hooks/useProfile";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { ApiError } from "@/lib/api";
 
+const Login = lazy(() => import("@/pages/Login"));
 const Home = lazy(() => import("@/pages/Home"));
 const Proposals = lazy(() => import("@/pages/Proposals"));
 const NewProposal = lazy(() => import("@/pages/NewProposal"));
@@ -46,9 +48,19 @@ window.addEventListener("vite:preloadError", (event) => {
   if (reloadForUpdate()) event.preventDefault();
 });
 
+/** Sends signed-out visitors to /login when the server requires an account. */
+function RequireAuth() {
+  const { ready, user, authRequired } = useAuth();
+  const location = useLocation();
+  if (!ready) return <div className="min-h-dvh bg-canvas" />;
+  if (authRequired && !user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  return <AppShell />;
+}
+
 const router = createBrowserRouter([
+  { path: "login", element: page(Login) },
   {
-    element: <AppShell />,
+    element: <RequireAuth />,
     errorElement: <RouteError fullPage />,
     children: [
       {
@@ -77,11 +89,13 @@ createRoot(document.getElementById("root")!).render(
     <MotionConfig reducedMotion="user">
       <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <ProfileProvider>
-          <ToastProvider>
-            <RouterProvider router={router} />
-          </ToastProvider>
-        </ProfileProvider>
+        <AuthProvider>
+          <ProfileProvider>
+            <ToastProvider>
+              <RouterProvider router={router} />
+            </ToastProvider>
+          </ProfileProvider>
+        </AuthProvider>
       </QueryClientProvider>
       </ThemeProvider>
     </MotionConfig>

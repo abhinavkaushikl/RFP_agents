@@ -88,7 +88,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     throw new ApiError("The API is not reachable. Check that the server is running.", 0, "network");
   }
-  if (!resp.ok) throw await errorFrom(resp);
+  if (!resp.ok) {
+    const err = await errorFrom(resp);
+    // The session expired mid-use: go back to the login page and return here afterwards.
+    if (err.code === "auth_required" && window.location.pathname !== "/login") {
+      window.location.assign("/login");
+    }
+    throw err;
+  }
   return (await resp.json()) as T;
 }
 
@@ -96,7 +103,25 @@ const json = (body: unknown) => JSON.stringify(Object.fromEntries(
   Object.entries(body as Record<string, unknown>).filter(([, v]) => v !== undefined && v !== null && v !== ""),
 ));
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export interface AuthState {
+  user: AuthUser | null;
+  auth_required: boolean;
+  signup_enabled: boolean;
+}
+
 export const api = {
+  me: () => request<AuthState>("/auth/me"),
+  login: (email: string, password: string) =>
+    request<{ user: AuthUser }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  signup: (name: string, email: string, password: string) =>
+    request<{ user: AuthUser }>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
+  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   ready: async (): Promise<Readiness> => {
     const resp = await fetch(`${API_BASE}/health/ready`, { headers: authHeaders() }).catch(() => null);
     if (!resp) throw new ApiError("The API is not reachable.", 0, "network");
