@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     api_keys: str = Field(default="", description="Comma-separated API keys; empty disables auth")
     auth_required: bool = Field(default=False, description="Require a signed-in user (or API key) on every API route")
     auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
+    google_client_id: str = ""
+    google_client_secret: SecretStr | None = None
+    public_url: str = Field(default="", description="e.g. https://rfp-agents.vercel.app; derived from the request when empty")
     mfa_key: str = Field(
         default="", description="Encrypts stored authenticator secrets. Falls back to RFP_AUTH_SECRET; set it separately "
         "so rotating the session secret does not disconnect everyone's authenticator app.",
@@ -159,6 +162,10 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [key.strip() for key in self.api_keys.split(",") if key.strip()]
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
     def admin_email_list(self) -> list[str]:

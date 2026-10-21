@@ -134,6 +134,7 @@ export interface AuthState {
   user: AuthUser | null;
   auth_required: boolean;
   signup_enabled: boolean;
+  google_enabled?: boolean;
 }
 
 export const api = {

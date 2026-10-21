@@ -14,6 +14,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   authRequired: boolean;
   signupEnabled: boolean;
+  googleEnabled: boolean;
   /** Undefined once signed in; otherwise the next step to show (an emailed code, or the authenticator code). */
   signIn: (email: string, password: string) => Promise<PendingSignIn | undefined>;
   signUp: (name: string, email: string, password: string) => Promise<PendingSignIn | undefined>;
@@ -76,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: state.user,
       authRequired: state.auth_required,
       signupEnabled: state.signup_enabled,
+      googleEnabled: Boolean(state.google_enabled),
       signIn: async (email, password) => settle(await api.login(email, password)),
       signUp: async (name, email, password) => settle(await api.signup(name, email, password)),
       verifyEmail: async (email, code) => adopt((await api.verifyEmail(email, code)).user),

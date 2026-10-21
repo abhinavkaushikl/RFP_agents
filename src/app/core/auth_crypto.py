@@ -212,3 +212,31 @@ def normalize_backup(code: str) -> str:
 
 def hash_backup(user_id: str, code: str) -> str:
     return _b64(hmac.new(_secret(), f"backup:{user_id}:{normalize_backup(code)}".encode(), hashlib.sha256).digest())
+
+
+# ── short-lived signed blobs (the OAuth round trip) ────────────────────
+def seal_blob(context: str, data: dict, ttl_s: int = 600, now: float | None = None) -> str:
+    import json
+
+    body = json.dumps({**data, "exp": int((now if now is not None else time.time()) + ttl_s)}, separators=(",", ":"))
+    mac = _b64(hmac.new(_secret(), f"blob:{context}:{body}".encode(), hashlib.sha256).digest())
+    return f"{_b64(body.encode())}.{mac}"
+
+
+def open_blob(context: str, token: str | None, now: float | None = None) -> dict | None:
+    import json
+
+    if not token or "." not in token:
+        return None
+    encoded, mac = token.rsplit(".", 1)
+    try:
+        body = _unb64(encoded).decode()
+        expected = _b64(hmac.new(_secret(), f"blob:{context}:{body}".encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(mac, expected):
+            return None
+        data = json.loads(body)
+        if int(data.get("exp", 0)) < (now if now is not None else time.time()):
+            return None
+        return data
+    except (ValueError, UnicodeDecodeError):
+        return None

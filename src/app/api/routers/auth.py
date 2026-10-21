@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import hmac
 import re
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -16,11 +18,12 @@ from app.api.deps import get_db
 from app.api.security import SESSION_COOKIE, UnauthorizedError, _api_limiter
 from app.core.auth_crypto import (
     DUMMY_HASH, hash_backup, hash_code, hash_password, issue_mfa_token, issue_session, new_backup_codes, new_code,
-    new_totp_secret, read_mfa_token, read_session, seal, totp_uri, unseal, verify_password, verify_totp,
+    new_totp_secret, open_blob, read_mfa_token, read_session, seal, seal_blob, totp_uri, unseal, verify_password, verify_totp,
 )
 from app.core.config import get_settings
 from app.core.errors import AppError, InvalidRequestError, RateLimitedError
 from app.db.models import EmailOtp, User
+from app.services import google_oauth
 from app.services.mailer import send_code
 
 from app.core.logging import get_logger
@@ -443,6 +446,103 @@ def mfa_disable(body: MfaDisableRequest, request: Request, db: Session = Depends
     return {"enabled": False}
 
 
+
+# ── Sign in with Google ────────────────────────────────────────────────
+_OAUTH_COOKIE = "rfp_oauth"
+
+
+def _origin(request: Request) -> str:
+    configured = get_settings().public_url.rstrip("/")
+    if configured:
+        return configured
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc)).split(",")[0].strip()
+    return f"{proto}://{host}"
+
+
+def _safe_next(path: str | None) -> str:
+    """Only same-site paths, so the login can't be used to bounce people to another site."""
+    return path if path and path.startswith("/") and not path.startswith("//") and "\\" not in path else "/"
+
+
+def _login_error(request: Request, code: str) -> RedirectResponse:
+    response = RedirectResponse(f"{_origin(request)}/login?google_error={code}", status_code=302)
+    response.delete_cookie(_OAUTH_COOKIE, path="/")
+    return response
+
+
+@router.get("/google/start")
+def google_start(request: Request, next: str | None = None) -> RedirectResponse:
+    if not get_settings().google_enabled:
+        return _login_error(request, "not_configured")
+    _throttle(request)
+    state = secrets.token_urlsafe(24)
+    verifier, challenge = google_oauth.new_pkce()
+    redirect_uri = f"{_origin(request)}/api/auth/google/callback"
+    response = RedirectResponse(
+        google_oauth.authorization_url(redirect_uri=redirect_uri, state=state, challenge=challenge), status_code=302,
+    )
+    response.set_cookie(
+        _OAUTH_COOKIE, seal_blob("oauth", {"state": state, "verifier": verifier, "next": _safe_next(next)}),
+        max_age=600, httponly=True, samesite="lax", secure=get_settings().environment == "production", path="/",
+    )
+    return response
+
+
+@router.get("/google/callback")
+def google_callback(
+    request: Request, code: str | None = None, state: str | None = None, error: str | None = None,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    settings = get_settings()
+    if not settings.google_enabled:
+        return _login_error(request, "not_configured")
+    saved = open_blob("oauth", request.cookies.get(_OAUTH_COOKIE))
+    if error or not code or not state or saved is None or not hmac.compare_digest(str(saved.get("state", "")), state):
+        return _login_error(request, "cancelled" if error else "expired")
+    try:
+        profile = google_oauth.fetch_profile(
+            code=code, verifier=saved["verifier"], redirect_uri=f"{_origin(request)}/api/auth/google/callback",
+        )
+    except AppError:
+        return _login_error(request, "failed")
+    if not profile["sub"] or not profile["email"] or not profile["email_verified"]:
+        return _login_error(request, "unverified_email")  # only emails Google itself has verified are trusted
+
+    user = db.scalar(select(User).where(User.google_sub == profile["sub"]))
+    if user is None:
+        user = db.scalar(select(User).where(User.email == profile["email"]))
+        if user is None:
+            if not settings.auth_allow_signup:
+                return _login_error(request, "signup_disabled")
+            user = User(
+                id=uuid.uuid4(), email=profile["email"], name=profile["name"],
+                password_hash=hash_password(secrets.token_urlsafe(32)),  # no password: they sign in with Google
+            )
+            db.add(user)
+        user.google_sub = profile["sub"]
+        if user.email_verified_at is None:
+            user.email_verified_at = _now()  # Google confirmed this address
+        if not user.name:
+            user.name = profile["name"]
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return _login_error(request, "failed")
+
+    destination = _safe_next(saved.get("next"))
+    if user.totp_enabled_at is not None:
+        # Their account has an authenticator: Google alone is not enough. The token travels in the URL
+        # fragment, which browsers never send to servers.
+        response = RedirectResponse(f"{_origin(request)}/login#mfa={issue_mfa_token(str(user.id))}&next={destination}", status_code=302)
+    else:
+        response = RedirectResponse(f"{_origin(request)}{destination}", status_code=302)
+        _set_cookie(response, user)
+    response.delete_cookie(_OAUTH_COOKIE, path="/")
+    return response
+
+
 @router.post("/logout")
 def logout(response: Response) -> dict:
     response.delete_cookie(SESSION_COOKIE, path="/")
@@ -464,4 +564,5 @@ def me(request: Request, db: Session = Depends(get_db)) -> dict:
         "user": _public(user) if user else None,
         "auth_required": settings.auth_required,
         "signup_enabled": settings.auth_allow_signup,
+        "google_enabled": settings.google_enabled,
     }

@@ -69,7 +69,7 @@ def test_session_token_rejects_tampering_and_expiry():
 
 def test_api_requires_sign_in(client):
     assert client.get("/api/profiles").status_code == 401
-    assert client.get("/api/auth/me").json() == {"user": None, "auth_required": True, "signup_enabled": True}
+    assert client.get("/api/auth/me").json() == {"user": None, "auth_required": True, "signup_enabled": True, "google_enabled": False}
 
 
 def test_signup_needs_the_emailed_code_before_anyone_is_signed_in(client):

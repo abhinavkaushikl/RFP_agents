@@ -106,11 +106,6 @@ function Handshake() {
   );
 }
 
-const AppleIcon = () => (
-  <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
-    <path d="M16.4 12.7c0-2.4 2-3.5 2.1-3.6-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.400 1.200 9.800.8 1.200 1.800 2.500 3 2.500 1.200 0 1.700-.8 3.100-.8 1.500 0 1.900.8 3.200.7 1.300 0 2.100-1.200 2.900-2.400.9-1.400 1.300-2.700 1.300-2.800-.1 0-2.400-.9-2.400-3.800zM14 5.600c.7-.8 1.100-1.900 1-3-1 0-2.100.7-2.800 1.500-.6.700-1.200 1.800-1 2.900 1.100.1 2.200-.6 2.800-1.400z" />
-  </svg>
-);
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
     <path fill="#4285F4" d="M22 12.2c0-.7-.1-1.400-.2-2H12v3.900h5.600a4.800 4.800 0 0 1-2.100 3.100v2.600h3.400c2-1.800 3.100-4.500 3.100-7.600z" />
@@ -192,7 +187,7 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const celebrating = useRef(false);
-  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, verifyAuthenticator, resendCode, forgotPassword, resetPassword } = useAuth();
+  const { ready, user, signupEnabled, googleEnabled, signIn, signUp, verifyEmail, verifyAuthenticator, resendCode, forgotPassword, resetPassword } = useAuth();
   // Set when the password was right and the authenticator-app code is still needed.
   const [mfa, setMfa] = useState<{ token: string; email: string } | null>(null);
   const [useBackup, setUseBackup] = useState(false);
@@ -204,7 +199,8 @@ export default function Login() {
   const [code, setCode] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
-  const from = (useLocation().state as { from?: string } | null)?.from ?? "/";
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? "/";
   const reduce = useReducedMotion();
   const mx = useMotionValue(0.5);
   const my = useMotionValue(0.5);
@@ -213,6 +209,32 @@ export default function Login() {
   const rotY = useTransform(sx, [0, 1], [-7, 7]);
   const rotX = useTransform(sy, [0, 1], [5, -5]);
   const spot = useMotionTemplate`radial-gradient(520px circle at ${useTransform(sx, [0, 1], ["0%", "100%"])} ${useTransform(sy, [0, 1], ["0%", "100%"])}, rgb(154 167 255 / 0.16), transparent 60%)`;
+
+  // Coming back from Google: show what went wrong, or ask for the authenticator code.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const problem = params.get("google_error");
+    if (problem) {
+      const text: Record<string, string> = {
+        cancelled: "Google sign-in was cancelled.",
+        expired: "That Google sign-in expired. Try again.",
+        failed: "Google sign-in did not complete. Try again.",
+        unverified_email: "Google could not confirm that email address.",
+        signup_disabled: "New accounts are turned off. Ask an administrator.",
+        not_configured: "Google sign-in is not set up yet.",
+      };
+      setError(text[problem] ?? "Google sign-in did not complete.");
+      navigate("/login", { replace: true });
+    }
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const token = hash.get("mfa");
+    if (token) {
+      setMfa({ token, email: "" });
+      setCode("");
+      navigate("/login", { replace: true, state: { from: hash.get("next") ?? "/" } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once when the page loads
+  }, []);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -620,17 +642,24 @@ export default function Login() {
                   {done ? <><Check className="size-4.5" /> {mode === "signup" ? "Account created" : "Welcome back"}</> : busy ? <Loader2 className="size-4.5 animate-spin" /> : <>{mode === "signup" ? "Create account" : "Continue"} <ArrowRight className="size-4.5 transition-transform group-hover:translate-x-0.5" /></>}
                 </motion.button>
               </div>,
-              <div key="o" className="flex items-center gap-3 py-1 text-caption text-ink-3">
-                <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
-              </div>,
-              <div key="s" className="grid grid-cols-2 gap-3">
-                {[["Apple", <AppleIcon key="a" />], ["Google", <GoogleIcon key="g" />]].map(([p, icon]) => (
-                  <motion.button key={p as string} type="button" whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }} transition={spring.snappy} className="flex h-11 items-center justify-center gap-2 rounded-[12px] border border-line-strong bg-fill text-small font-medium text-ink-2 transition hover:bg-wash hover:text-ink">
-                    {icon}
-                    {p}
-                  </motion.button>
-                ))}
-              </div>,
+              ...(googleEnabled
+                ? [
+                    <div key="o" className="flex items-center gap-3 py-1 text-caption text-ink-3">
+                      <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
+                    </div>,
+                    <motion.a
+                      key="g"
+                      href={`/api/auth/google/start?next=${encodeURIComponent(from)}`}
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.98 }}
+                      transition={spring.snappy}
+                      className="flex h-11 items-center justify-center gap-2.5 rounded-[12px] border border-line-strong bg-fill text-small font-medium text-ink-2 transition hover:bg-wash hover:text-ink"
+                    >
+                      <GoogleIcon />
+                      Continue with Google
+                    </motion.a>,
+                  ]
+                : []),
             ].map((child) => (
               <motion.div key={child.key} variants={{ hide: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: spring.smooth } }}>
                 {child}

@@ -413,6 +413,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Google's stable id for this person, set the first time they sign in with Google.
+    google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     # "member" sees only their own work; "admin" can also see everyone's (see core/access.py).
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="member", server_default="member")
     # Authenticator-app two-step sign-in. The secret is stored sealed (encrypted), never as plain text.
