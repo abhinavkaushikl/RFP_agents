@@ -415,6 +415,13 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     # "member" sees only their own work; "admin" can also see everyone's (see core/access.py).
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="member", server_default="member")
+    # Authenticator-app two-step sign-in. The secret is stored sealed (encrypted), never as plain text.
+    totp_secret_enc: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    totp_last_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mfa_backup_hashes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    mfa_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    mfa_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set when the person proves they own the address by entering the emailed code.
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = now_column()

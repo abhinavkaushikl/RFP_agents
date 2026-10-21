@@ -112,10 +112,23 @@ export interface AuthUser {
   email: string;
   name: string;
   role?: "member" | "admin";
+  mfa_enabled?: boolean;
 }
 
 /** Either signed in, or the account still needs the emailed code. */
-export type SignInResult = { user: AuthUser } | { verification_required: true; email: string };
+export type SignInResult =
+  | { user: AuthUser }
+  | { verification_required: true; email: string }
+  | { mfa_required: true; mfa_token: string; email: string };
+
+export type ResetResult = { user: AuthUser } | { password_updated: true; login_required: true };
+
+export interface MfaSetup {
+  secret: string;
+  otpauth_uri: string;
+  /** SVG data URL, safe to use as an <img> source. */
+  qr: string;
+}
 
 export interface AuthState {
   user: AuthUser | null;
@@ -142,10 +155,17 @@ export const api = {
     request<SignInResult>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
   verifyEmail: (email: string, code: string) =>
     request<{ user: AuthUser }>("/auth/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+  mfaVerify: (mfaToken: string, code: string) =>
+    request<{ user: AuthUser }>("/auth/mfa/verify", { method: "POST", body: JSON.stringify({ mfa_token: mfaToken, code }) }),
+  mfaSetup: () => request<MfaSetup>("/auth/mfa/setup", { method: "POST" }),
+  mfaEnable: (code: string) =>
+    request<{ enabled: boolean; backup_codes: string[] }>("/auth/mfa/enable", { method: "POST", body: JSON.stringify({ code }) }),
+  mfaDisable: (password: string, code: string) =>
+    request<{ enabled: boolean }>("/auth/mfa/disable", { method: "POST", body: JSON.stringify({ password, code }) }),
   forgotPassword: (email: string) =>
     request<{ ok: boolean }>("/auth/forgot", { method: "POST", body: JSON.stringify({ email }) }),
   resetPassword: (email: string, code: string, newPassword: string) =>
-    request<{ user: AuthUser }>("/auth/reset-password", { method: "POST", body: JSON.stringify({ email, code, new_password: newPassword }) }),
+    request<ResetResult>("/auth/reset-password", { method: "POST", body: JSON.stringify({ email, code, new_password: newPassword }) }),
   resendCode: (email: string) => request<{ ok: boolean }>("/auth/resend", { method: "POST", body: JSON.stringify({ email }) }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   ready: async (): Promise<Readiness> => {

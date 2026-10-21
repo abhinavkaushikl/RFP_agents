@@ -59,8 +59,9 @@ def test_password_hash_roundtrip():
 
 
 def test_session_token_rejects_tampering_and_expiry():
-    token = auth_crypto.issue_session("abc", now=1_000)
-    assert auth_crypto.read_session(token, now=1_001) == "abc"
+    uid = "5f0c1c0a-6a9d-4d9b-8b6a-0b3f5a3c9d11"
+    token = auth_crypto.issue_session(uid, now=1_000)
+    assert auth_crypto.read_session(token, now=1_001) == uid
     assert auth_crypto.read_session(token, now=1_000 + 8 * 24 * 3600) is None
     assert auth_crypto.read_session(token[:-2] + "xx", now=1_001) is None
     assert auth_crypto.read_session(None) is None

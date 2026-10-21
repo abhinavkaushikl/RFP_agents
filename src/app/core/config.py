@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     api_keys: str = Field(default="", description="Comma-separated API keys; empty disables auth")
     auth_required: bool = Field(default=False, description="Require a signed-in user (or API key) on every API route")
     auth_secret: str = Field(default="", description="Signs session cookies; set a long random value in production")
+    mfa_key: str = Field(
+        default="", description="Encrypts stored authenticator secrets. Falls back to RFP_AUTH_SECRET; set it separately "
+        "so rotating the session secret does not disconnect everyone's authenticator app.",
+    )
     auth_session_ttl_s: int = Field(default=7 * 24 * 3600, ge=60)
     auth_allow_signup: bool = True
     # Email confirmation (one-time code sent at sign-up and for unconfirmed sign-ins).

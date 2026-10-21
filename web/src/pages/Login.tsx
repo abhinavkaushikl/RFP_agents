@@ -192,7 +192,10 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const celebrating = useRef(false);
-  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, resendCode, forgotPassword, resetPassword } = useAuth();
+  const { ready, user, signupEnabled, signIn, signUp, verifyEmail, verifyAuthenticator, resendCode, forgotPassword, resetPassword } = useAuth();
+  // Set when the password was right and the authenticator-app code is still needed.
+  const [mfa, setMfa] = useState<{ token: string; email: string } | null>(null);
+  const [useBackup, setUseBackup] = useState(false);
   // Forgot-password flow: ask for the address, then the emailed code and a new password.
   const [reset, setReset] = useState<null | "email" | "code">(null);
   const [newPassword, setNewPassword] = useState("");
@@ -231,11 +234,20 @@ export default function Login() {
     setError(null);
     celebrating.current = true;
     try {
-      const needsCode = mode === "signup" ? await signUp(name.trim(), email.trim(), password) : await signIn(email.trim(), password);
-      if (needsCode) {
+      const pending = mode === "signup" ? await signUp(name.trim(), email.trim(), password) : await signIn(email.trim(), password);
+      if (pending?.step === "authenticator") {
+        // Password accepted. Not signed in until the code from the authenticator app is entered.
+        celebrating.current = false;
+        setMfa({ token: pending.token, email: pending.email });
+        setCode("");
+        setUseBackup(false);
+        setBusy(false);
+        return;
+      }
+      if (pending) {
         // Not signed in yet: the address has to be confirmed first.
         celebrating.current = false;
-        setPendingEmail(needsCode);
+        setPendingEmail(pending.email);
         setCode("");
         setCooldown(45);
         setBusy(false);
@@ -264,6 +276,29 @@ export default function Login() {
       celebrating.current = false;
       setBusy(false);
     }
+  }
+
+  async function confirmAuthenticator(value: string) {
+    if (busy || !mfa || !value.trim()) return;
+    setBusy(true);
+    setError(null);
+    celebrating.current = true;
+    try {
+      await verifyAuthenticator(mfa.token, value.trim());
+      finish();
+    } catch (err) {
+      fail(err);
+      setCode("");
+      celebrating.current = false;
+      setBusy(false);
+    }
+  }
+
+  function leaveAuthenticator() {
+    setMfa(null);
+    setCode("");
+    setError(null);
+    setUseBackup(false);
   }
 
   async function resend() {
@@ -303,7 +338,19 @@ export default function Login() {
     setError(null);
     celebrating.current = true;
     try {
-      await resetPassword(email.trim(), code, newPassword);
+      const outcome = await resetPassword(email.trim(), code, newPassword);
+      if (outcome === "login-required") {
+        // Their account has two-step sign-in: the new password still needs the authenticator code.
+        celebrating.current = false;
+        setBusy(false);
+        setReset(null);
+        setCode("");
+        setNewPassword("");
+        setPassword("");
+        setMode("signin");
+        setNotice("Password updated. Sign in with it now, and your authenticator code.");
+        return;
+      }
       finish();
     } catch (err) {
       fail(err);
@@ -357,7 +404,70 @@ export default function Login() {
             Sign in and turn any request for proposal into a winning response.
           </motion.p>
 
-          {reset ? (
+          {mfa ? (
+            <motion.form
+              key="authenticator"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={spring.smooth}
+              onSubmit={(e) => { e.preventDefault(); void confirmAuthenticator(code); }}
+              className="mt-8 space-y-4 rounded-[24px] border border-white/10 bg-white/[0.035] p-6 shadow-[0_30px_80px_-30px_rgb(0_0_0/0.7),inset_0_1px_0_rgb(255_255_255/0.08)] backdrop-blur-md"
+            >
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-ion-soft text-ion-strong"><ShieldCheck className="size-5" /></span>
+                <div>
+                  <h2 className="text-lead font-semibold">Two-step sign-in</h2>
+                  <p className="text-small text-ink-2">
+                    {useBackup ? "Enter one of your backup codes." : "Open your authenticator app and enter the 6-digit code for Proposal Builder."}
+                  </p>
+                </div>
+              </div>
+              {useBackup ? (
+                <input
+                  autoFocus
+                  autoComplete="off"
+                  aria-label="Backup code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toLowerCase().replace(/[^0-9a-f-]/g, "").slice(0, 13))}
+                  placeholder="abc123-def456"
+                  className="h-14 w-full rounded-[12px] border border-line-strong bg-fill text-center font-mono text-[1.3rem] tracking-[0.2em] text-ink outline-none transition placeholder:text-ink-3/50 focus:border-ion focus:bg-wash focus:shadow-[0_0_0_4px_var(--color-ion-soft)]"
+                />
+              ) : (
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  aria-label="6-digit code"
+                  value={code}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
+                    setCode(digits);
+                    if (digits.length === 6) void confirmAuthenticator(digits);
+                  }}
+                  placeholder="000000"
+                  className="h-14 w-full rounded-[12px] border border-line-strong bg-fill text-center font-mono text-[1.6rem] tracking-[0.5em] text-ink outline-none transition placeholder:text-ink-3/50 focus:border-ion focus:bg-wash focus:shadow-[0_0_0_4px_var(--color-ion-soft)]"
+                />
+              )}
+              {error && <p role="alert" className="rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-small text-bad-text">{error}</p>}
+              <motion.button
+                type="submit"
+                disabled={busy || (useBackup ? code.length < 11 : code.length !== 6)}
+                whileTap={{ scale: 0.97 }}
+                transition={spring.snappy}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-gradient-to-b from-[#8c9bff] to-[#6577f5] text-body font-semibold text-on-ion shadow-[0_10px_28px_-8px_var(--color-glow-strong),inset_0_1px_0_rgb(255_255_255/0.35)] disabled:opacity-50"
+              >
+                {done ? <><Check className="size-4.5" /> Signed in</> : busy ? <Loader2 className="size-4.5 animate-spin" /> : <>Verify <ArrowRight className="size-4.5" /></>}
+              </motion.button>
+              <div className="flex items-center justify-between text-small">
+                <button type="button" onClick={leaveAuthenticator} className="inline-flex items-center gap-1 text-ink-3 hover:text-ink"><ArrowLeft className="size-3.5" /> Back</button>
+                <button type="button" onClick={() => { setUseBackup((v) => !v); setCode(""); setError(null); }} className="text-ion-strong hover:underline">
+                  {useBackup ? "Use my authenticator app" : "Use a backup code"}
+                </button>
+              </div>
+            </motion.form>
+          ) : reset ? (
             <motion.form
               key={`reset-${reset}`}
               initial={{ opacity: 0, y: 12 }}
@@ -496,6 +606,7 @@ export default function Login() {
               ...(mode === "signin"
                 ? [<div key="fp" className="-mt-1 flex justify-end"><button type="button" onClick={() => { setReset("email"); setError(null); }} className="text-small text-ion-strong hover:underline">Forgot password?</button></div>]
                 : []),
+              ...(notice && !error ? [<p key="note" role="status" className="rounded-[10px] border border-line bg-fill px-3 py-2 text-small text-ink-2">{notice}</p>] : []),
               ...(error ? [<p key="err" role="alert" className="rounded-[10px] border border-bad/30 bg-bad/10 px-3 py-2 text-small text-bad-text">{error}</p>] : []),
               <div key="b">
                 <motion.button

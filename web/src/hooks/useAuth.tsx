@@ -3,19 +3,28 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { api, ApiError, type AuthState, type AuthUser, type SignInResult } from "@/lib/api";
 
+/** What the sign-in screen must ask for next, when signing in is not finished yet. */
+export type PendingSignIn =
+  | { step: "email-code"; email: string }
+  | { step: "authenticator"; email: string; token: string };
+
 interface AuthContextValue {
   /** false until the first /auth/me answer arrives */
   ready: boolean;
   user: AuthUser | null;
   authRequired: boolean;
   signupEnabled: boolean;
-  /** Resolves to the address that was sent a code when the account still needs confirming, else undefined. */
-  signIn: (email: string, password: string) => Promise<string | undefined>;
-  signUp: (name: string, email: string, password: string) => Promise<string | undefined>;
+  /** Undefined once signed in; otherwise the next step to show (an emailed code, or the authenticator code). */
+  signIn: (email: string, password: string) => Promise<PendingSignIn | undefined>;
+  signUp: (name: string, email: string, password: string) => Promise<PendingSignIn | undefined>;
   verifyEmail: (email: string, code: string) => Promise<void>;
+  verifyAuthenticator: (token: string, code: string) => Promise<void>;
+  /** Re-reads the signed-in user, e.g. after turning two-step sign-in on or off. */
+  refreshUser: () => Promise<void>;
   resendCode: (email: string) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
-  resetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
+  /** Resolves to "signed-in", or "login-required" when an authenticator code is still needed to sign in. */
+  resetPassword: (email: string, code: string, newPassword: string) => Promise<"signed-in" | "login-required">;
   signOut: () => Promise<void>;
 }
 
@@ -50,12 +59,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const settle = useCallback(
-    (result: SignInResult): string | undefined => {
+    (result: SignInResult): PendingSignIn | undefined => {
       if ("user" in result) {
         adopt(result.user);
         return undefined;
       }
-      return result.email;
+      if ("mfa_required" in result) return { step: "authenticator", email: result.email, token: result.mfa_token };
+      return { step: "email-code", email: result.email };
     },
     [adopt],
   );
@@ -69,13 +79,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn: async (email, password) => settle(await api.login(email, password)),
       signUp: async (name, email, password) => settle(await api.signup(name, email, password)),
       verifyEmail: async (email, code) => adopt((await api.verifyEmail(email, code)).user),
+      verifyAuthenticator: async (token, code) => adopt((await api.mfaVerify(token, code)).user),
+      refreshUser: async () => {
+        const next = await api.me();
+        setState((s) => ({ ...s, user: next.user }));
+      },
       resendCode: async (email) => {
         await api.resendCode(email);
       },
       forgotPassword: async (email) => {
         await api.forgotPassword(email);
       },
-      resetPassword: async (email, code, newPassword) => adopt((await api.resetPassword(email, code, newPassword)).user),
+      resetPassword: async (email, code, newPassword) => {
+        const result = await api.resetPassword(email, code, newPassword);
+        if ("user" in result) {
+          adopt(result.user);
+          return "signed-in";
+        }
+        return "login-required";
+      },
       signOut: async () => {
         await api.logout().catch(() => undefined);
         queryClient.clear();

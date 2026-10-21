@@ -3,6 +3,7 @@ import { CheckCircle2, CircleDashed, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { useToast } from "@/components/Toast";
+import { TwoStepPanel } from "@/components/TwoStepPanel";
 import { Button, Field, PageHeader, Panel, PanelHeader, Segmented, StatusTag, TextInput } from "@/components/ui";
 import { useProfile } from "@/hooks/useProfile";
 import { useReadiness } from "@/hooks/useReadiness";
@@ -46,6 +47,7 @@ export default function Settings() {
             />
           </div>
         </Panel>
+        <TwoStepPanel />
         <Panel>
           <PanelHeader title="Access" description="Needed only when the server sets RFP_API_KEYS. Saved in this browser." />
           <form
